@@ -7,19 +7,19 @@
 \toprule
 \textbf{Configuration} & \textbf{FAR (\%)} & \textbf{FRR (\%)} & \textbf{EER (\%)} & \textbf{Accuracy (\%)} \\
 \midrule
-Mechanical only ($S_M$)        &   0.0 &  95.6 &  47.8 &  45.4 \\
-Acoustic only ($S_A$)          &   0.0 & 100.0 &  50.0 &  42.9 \\
-Ultrasonic only ($S_U$)        &  64.2 &   1.2 &  32.7 &  71.8 \\
+Mechanical only ($S_M$)        &   1.7 &  71.9 &  36.8 &  58.2 \\
+Acoustic only ($S_A$)          &  74.2 &  18.8 &  46.5 &  57.5 \\
+Ultrasonic only ($S_U$)        &  41.7 &   7.5 &  24.6 &  77.9 \\
 \midrule
-Mech. + Acous. (AND)           &   0.0 & 100.0 &  50.0 &  42.9 \\
-Mech. + Ultra. (AND)           &   0.0 &  95.6 &  47.8 &  45.4 \\
-Acous. + Ultra. (AND)          &   0.0 & 100.0 &  50.0 &  42.9 \\
+Mech. + Acous. (AND)           &   1.7 &  75.0 &  38.3 &  56.4 \\
+Mech. + Ultra. (AND)           &   0.8 &  73.1 &  37.0 &  57.9 \\
+Acous. + Ultra. (AND)          &  27.5 &  23.1 &  25.3 &  75.0 \\
 \midrule
-\textbf{All three (AND)}       &   0.0 & 100.0 &  50.0 &  42.9 \\
+\textbf{All three (AND)}       &   0.8 &  76.2 &  38.5 &  56.1 \\
 \bottomrule
 \end{tabular}
 \\[2pt]
-\scriptsize FAR: 0 false accepts / 120 impostor attempts.\\
-\scriptsize FRR: 160 false rejects / 160 genuine attempts.\\
+\scriptsize FAR: 1 false accepts / 120 impostor attempts.\\
+\scriptsize FRR: 122 false rejects / 160 genuine attempts.\\
 \scriptsize Simulation using empirically-derived sensor noise models.
 \end{table}

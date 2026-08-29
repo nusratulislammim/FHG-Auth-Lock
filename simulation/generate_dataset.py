@@ -18,7 +18,7 @@ GENUINE_ATTEMPTS_PER_USER = 20  # 4 sessions × 5 attempts
 IMPOSTOR_TARGETS_PER_USER = 3
 IMPOSTOR_ATTEMPTS_PER_TARGET = 5
 
-# Output file - use absolute path from current directory
+# Output file 
 OUTPUT_CSV = "../data/experimental_data_N8.csv"
 
 def simulate_genuine_attempt(user_profile, session_num, attempt_num):

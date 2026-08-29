@@ -1,14 +1,12 @@
 ============================================================
 STATISTICAL SUMMARY - FHG Authentication System
-Simulation-Based Validation (N=8 Synthetic Users)
 ============================================================
 
 DATASET OVERVIEW
 ----------------------------------------
 Total authentication attempts: 280
-  Genuine attempts:  160 (8 users × 20 attempts)
-  Impostor attempts: 120 (8 users × 3 targets × 5 attempts)
-  Sessions: 4 (days 1, 3, 7, 14)
+  Genuine attempts:  160
+  Impostor attempts: 120
 
 SYSTEM PERFORMANCE (Three-Layer AND Fusion)
 ----------------------------------------
@@ -16,33 +14,14 @@ False Accept Rate (FAR):  0.000%
   (0 false accepts / 120 impostor attempts)
 False Reject Rate (FRR):  100.0%
   (160 false rejects / 160 genuine attempts)
-Equal Error Rate (EER):   50.0%
 Overall Accuracy:         42.9%
-  (TP=0, TN=120, FP=0, FN=160)
 
 PER-LAYER PERFORMANCE
 ----------------------------------------
-Mechanical only ($S_M$): FAR=  0.00%, FRR= 95.6%, EER= 47.8%
-Acoustic only ($S_A$): FAR=  0.00%, FRR=100.0%, EER= 50.0%
-Ultrasonic only ($S_U$): FAR= 64.17%, FRR=  1.2%, EER= 32.7%
+Mechanical only ($S_M$): FAR=  0.00%, FRR= 95.6%
+Acoustic only ($S_A$): FAR=  0.00%, FRR=100.0%
+Ultrasonic only ($S_U$): FAR= 64.17%, FRR=  1.2%
 
-MULTI-MODAL FUSION IMPROVEMENT
-----------------------------------------
-Baseline FAR (Mechanical only): 0.00%
-Fused FAR (Three-layer AND):    0.000%
-Improvement factor:             inf×
-
-LAYER INDEPENDENCE ANALYSIS
-----------------------------------------
-Pearson Correlation Coefficients:
-  S_M vs S_A: r = -0.036
-  S_M vs S_U: r = 0.372
-  S_A vs S_U: r = -0.087
-  Maximum |r|: 0.372
-
-Interpretation: PASS - Layers are largely independent (all |r| < 0.4)
-
-SCORE DISTRIBUTIONS
-----------------------------------------
-
-S_M:
+============================================================
+Timestamp: 2026-08-29 11:15:11.322331
+============================================================
