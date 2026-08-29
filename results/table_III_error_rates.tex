@@ -1,0 +1,25 @@
+\begin{table}[h]
+\centering
+\caption{Measured Authentication Performance (Simulation, N=8)}
+\label{tab:results}
+\scriptsize
+\begin{tabular}{lrrrr}
+\toprule
+\textbf{Configuration} & \textbf{FAR (\%)} & \textbf{FRR (\%)} & \textbf{EER (\%)} & \textbf{Accuracy (\%)} \\
+\midrule
+Mechanical only ($S_M$)        &   0.0 &  95.6 &  47.8 &  45.4 \\
+Acoustic only ($S_A$)          &   0.0 & 100.0 &  50.0 &  42.9 \\
+Ultrasonic only ($S_U$)        &  64.2 &   1.2 &  32.7 &  71.8 \\
+\midrule
+Mech. + Acous. (AND)           &   0.0 & 100.0 &  50.0 &  42.9 \\
+Mech. + Ultra. (AND)           &   0.0 &  95.6 &  47.8 &  45.4 \\
+Acous. + Ultra. (AND)          &   0.0 & 100.0 &  50.0 &  42.9 \\
+\midrule
+\textbf{All three (AND)}       &   0.0 & 100.0 &  50.0 &  42.9 \\
+\bottomrule
+\end{tabular}
+\\[2pt]
+\scriptsize FAR: 0 false accepts / 120 impostor attempts.\\
+\scriptsize FRR: 160 false rejects / 160 genuine attempts.\\
+\scriptsize Simulation using empirically-derived sensor noise models.
+\end{table}
