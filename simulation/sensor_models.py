@@ -1,9 +1,6 @@
 """
 sensor_models.py - Realistic Sensor Simulation Models
 Based on FSR-402, MAX4466, and HC-SR04 specifications
-
-Authors: Nusratul Islam Mim, Firuze Tasnim Sneha, Al Musabbir, Dr. Md. Sujan Ali
-Institution: JKKNIU, Bangladesh
 """
 
 import numpy as np
@@ -49,7 +46,6 @@ class UserProfile:
         self.distance_std = np.random.uniform(15, 35)
 
 class FSRSimulator:
-    """Simulates FSR-402 force sensor"""
     def __init__(self):
         self.adc_resolution = 1024
         self.noise_factor = 0.03
@@ -70,7 +66,6 @@ class FSRSimulator:
         return int(max(100, true_gap_ms + noise))
 
 class MicrophoneSimulator:
-    """Simulates MAX4466 electret microphone"""
     def __init__(self):
         self.sample_rate = 8000
     
@@ -81,16 +76,16 @@ class MicrophoneSimulator:
     def measure_press_rms(self, baseline, press_force_adc):
         baseline = max(baseline, 1)
         press_force_adc = max(press_force_adc, 0)
-        rms = baseline + 5 + (press_force_adc / 15)
-        noise = np.random.normal(0, 2)
-        return int(max(baseline + 2, rms + noise))
+        # Stricter: more energy required
+        rms = baseline + 10 + (press_force_adc / 10)
+        noise = np.random.normal(0, 3)
+        return int(max(baseline + 5, rms + noise))
     
     def check_temporal_correlation(self, press_timestamp_ms):
         jitter = np.random.normal(0, 30)
         return abs(jitter) < 50
 
 class UltrasonicSimulator:
-    """Simulates HC-SR04 ultrasonic ranging sensor"""
     def __init__(self):
         self.min_range_mm = 20
         self.max_range_mm = 4000
@@ -117,7 +112,6 @@ class UltrasonicSimulator:
         return distances
 
 class ImpostorModel:
-    """Models impostor attack behavior"""
     def __init__(self, genuine_profile, observation_accuracy=0.7):
         self.genuine = genuine_profile
         self.accuracy = observation_accuracy
@@ -158,11 +152,10 @@ class ImpostorModel:
         }
 
 # ========================================
-# HELPER FUNCTIONS - FINAL TUNED VERSION
+# HELPER FUNCTIONS
 # ========================================
 
 def create_user_profiles(num_users=8):
-    """Create N synthetic user profiles"""
     profiles = []
     for i in range(num_users):
         profile = UserProfile(user_id=i+1)
@@ -177,7 +170,6 @@ def create_user_profiles(num_users=8):
     return profiles
 
 def compute_mechanical_score(observed, enrolled_mean, delta_f=80, delta_t=150):
-    """Compute mechanical similarity score with relaxed tolerances"""
     scores = []
     for i in range(3):
         dF = (observed['force'][i] - enrolled_mean['force'][i]) / delta_f
@@ -192,8 +184,10 @@ def compute_mechanical_score(observed, enrolled_mean, delta_f=80, delta_t=150):
     
     return int(100 * np.mean(scores))
 
-def compute_acoustic_score(press_forces, baseline, threshold_multiplier=2.0):
-    """Compute acoustic liveness score - STRICTER VERSION"""
+def compute_acoustic_score(press_forces, baseline, threshold_multiplier=2.5):
+    """
+    Compute acoustic liveness score - STRICTER VERSION
+    """
     if len(press_forces) == 0:
         return 0
     
@@ -204,7 +198,8 @@ def compute_acoustic_score(press_forces, baseline, threshold_multiplier=2.0):
         if force is None or force <= 0:
             continue
         
-        rms = baseline + 5 + (force / 15)
+        # Stricter acoustic energy requirement
+        rms = baseline + 10 + (force / 10)
         energy_ok = (rms > threshold_multiplier * baseline)
         
         if energy_ok:
@@ -214,7 +209,6 @@ def compute_acoustic_score(press_forces, baseline, threshold_multiplier=2.0):
     return score
 
 def compute_spatial_score(observed_dist, enrolled_dist, tolerance_mm=30):
-    """Compute spatial similarity score - STRICTER VERSION"""
     observed_dist = abs(observed_dist)
     enrolled_dist = abs(enrolled_dist)
     dist_diff = abs(observed_dist - enrolled_dist)
@@ -222,7 +216,6 @@ def compute_spatial_score(observed_dist, enrolled_dist, tolerance_mm=30):
     return int(100 * similarity)
 
 def apply_fusion_rule(s_m, s_a, s_u, thresh_m=70, thresh_a=50, thresh_u=70):
-    """AND-rule fusion with balanced thresholds"""
     return (s_m > thresh_m) and (s_a > thresh_a) and (s_u > thresh_u)
 
 if __name__ == "__main__":
