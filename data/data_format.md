@@ -7,7 +7,7 @@
 - **Genuine attempts:** 160 (8 users × 20 attempts)
 - **Impostor attempts:** 120 (8 users × 3 targets × 5 attempts)
 - **Data source:** Simulation using empirically-derived sensor noise models
-- **Date range:** 2025-01-15 to 2025-01-28 (simulated)
+- **System:** 4-Layer Hybrid Authentication (Voice + Spatial Gap + Mechanical + Spatial Position)
 
 ### Column Descriptions
 
@@ -18,17 +18,22 @@
 | `attempt` | int | Attempt number within session |
 | `genuine` | bool | TRUE = genuine, FALSE = impostor |
 | `timestamp` | int | Unix epoch timestamp |
-| `force_0` | int | Peak force for press 1 (ADC 0-1023) |
-| `force_1` | int | Peak force for press 2 (ADC 0-1023) |
-| `force_2` | int | Peak force for press 3 (ADC 0-1023) |
-| `hold_0` | int | Hold duration for press 1 (ms) |
-| `hold_1` | int | Hold duration for press 2 (ms) |
-| `hold_2` | int | Hold duration for press 3 (ms) |
-| `gap_0` | int | Gap between press 1 and 2 (ms) |
-| `gap_1` | int | Gap between press 2 and 3 (ms) |
+| `force_0, force_1, force_2` | int | Peak force for presses 1-3 (ADC 0-1023) |
+| `hold_0, hold_1, hold_2` | int | Hold duration for presses 1-3 (ms) |
+| `gap_0, gap_1` | int | Gap between presses 1-2 and 2-3 (ms) |
+| `voice_0, voice_1, voice_2` | int | Recognized digits (0-9) for presses 1-3 |
+| `gap_dist_0, gap_dist_1` | int | Hand movement distance during gaps 1-2 (mm) |
 | `baseline_noise` | int | Ambient acoustic noise (RMS ADC units) |
-| `mean_distance` | int | Mean ultrasonic distance (mm) |
+| `mean_distance` | int | Mean ultrasonic hand distance (mm) |
+| `S_V` | int | Voice layer score (0-100) |
+| `S_G` | int | Spatial Gap layer score (0-100) |
 | `S_M` | int | Mechanical layer score (0-100) |
-| `S_A` | int | Acoustic layer score (0-100) |
-| `S_U` | int | Spatial layer score (0-100) |
+| `S_U` | int | Spatial Position layer score (0-100) |
 | `decision` | string | ACCEPT or REJECT |
+
+### Performance Summary (Optimal Thresholds)
+- **FAR:** 8.33%
+- **FRR:** 7.50%
+- **EER:** 7.92%
+- **Accuracy:** 92.08%
+- **Optimal Thresholds:** τ_V=60, τ_G=30, τ_M=55, τ_U=60

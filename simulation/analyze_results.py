@@ -2,6 +2,12 @@
 analyze_results.py - Statistical Analysis & Visualization
 Generates LaTeX tables and figures for paper
 
+UPDATED: Now supports 4-layer authentication:
+- S_M: Mechanical (FHG)
+- S_V: Voice (3 digits)
+- S_G: Spatial Gap
+- S_U: Spatial Position
+
 Authors: Nusratul Islam Mim, Firuze Tasnim Sneha, Al Musabbir, Dr. Md. Sujan Ali
 """
 
@@ -30,6 +36,8 @@ def load_data():
     print(f"✅ Loaded {len(df)} authentication attempts")
     print(f"  Genuine: {df['genuine'].sum()}")
     print(f"  Impostor: {(~df['genuine']).sum()}\n")
+    print(f"  Columns: {df.columns.tolist()}")
+    print()
     return df
 
 def compute_error_rates_from_csv(df, config_name, score_cols, thresholds):
@@ -72,33 +80,48 @@ def compute_error_rates_from_csv(df, config_name, score_cols, thresholds):
     }
 
 def generate_table_III(df):
-    """Generate Table III: Error Rates"""
+    """Generate Table III: Error Rates for 4-layer system"""
     print("=== Computing Error Rates ===\n")
     
+    # Updated thresholds for hybrid fusion
+    thresholds = {
+        'S_M': 55,   # Mechanical (FHG)
+        'S_V': 45,   # Voice
+        'S_G': 50,   # Spatial Gap
+        'S_U': 55    # Spatial Position
+    }
     
-    thresholds = {'S_M': 70, 'S_A': 50, 'S_U': 70}
-    
+    # Single-layer and combined configurations
     configs = [
+        ('Voice only ($S_V$)', ['S_V']),
+        ('Spatial Gap only ($S_G$)', ['S_G']),
         ('Mechanical only ($S_M$)', ['S_M']),
-        ('Acoustic only ($S_A$)', ['S_A']),
-        ('Ultrasonic only ($S_U$)', ['S_U']),
-        ('Mech. + Acous. (AND)', ['S_M', 'S_A']),
-        ('Mech. + Ultra. (AND)', ['S_M', 'S_U']),
-        ('Acous. + Ultra. (AND)', ['S_A', 'S_U']),
-        ('\\textbf{All three (AND)}', ['S_M', 'S_A', 'S_U']),
+        ('Spatial Position only ($S_U$)', ['S_U']),
+        ('Voice + Gap (AND)', ['S_V', 'S_G']),
+        ('Voice + Mech. (AND)', ['S_V', 'S_M']),
+        ('Voice + Spatial (AND)', ['S_V', 'S_U']),
+        ('Gap + Mech. (AND)', ['S_G', 'S_M']),
+        ('Gap + Spatial (AND)', ['S_G', 'S_U']),
+        ('Mech. + Spatial (AND)', ['S_M', 'S_U']),
+        ('Voice + Gap + Mech. (AND)', ['S_V', 'S_G', 'S_M']),
+        ('Voice + Gap + Spatial (AND)', ['S_V', 'S_G', 'S_U']),
+        ('Voice + Mech. + Spatial (AND)', ['S_V', 'S_M', 'S_U']),
+        ('Gap + Mech. + Spatial (AND)', ['S_G', 'S_M', 'S_U']),
+        ('\\textbf{All 4 layers (Hybrid)}', ['S_V', 'S_G', 'S_M', 'S_U']),
     ]
     
     results = []
     for config_name, score_cols in configs:
         res = compute_error_rates_from_csv(df, config_name, score_cols, thresholds)
         results.append(res)
-        print(f"{config_name:30s}: FAR={res['FAR']:6.3f}% FRR={res['FRR']:5.1f}% Acc={res['Accuracy']:5.1f}%")
+        print(f"{config_name:35s}: FAR={res['FAR']:6.3f}% FRR={res['FRR']:5.1f}% Acc={res['Accuracy']:5.1f}%")
     
     print()
     
+    # Generate LaTeX table
     latex = r"""\begin{table}[h]
 \centering
-\caption{Measured Authentication Performance (Simulation, N=8)}
+\caption{Simulated Authentication Performance (4-Layer Hybrid System, N=8)}
 \label{tab:results}
 \scriptsize
 \begin{tabular}{lrrrr}
@@ -108,8 +131,8 @@ def generate_table_III(df):
 """
     
     for res in results:
-        latex += f"{res['config']:30s} & {res['FAR']:5.1f} & {res['FRR']:5.1f} & {res['EER']:5.1f} & {res['Accuracy']:5.1f} \\\\\n"
-        if res['config'] == 'Ultrasonic only ($S_U$)' or res['config'] == 'Acous. + Ultra. (AND)':
+        latex += f"{res['config']:35s} & {res['FAR']:5.1f} & {res['FRR']:5.1f} & {res['EER']:5.1f} & {res['Accuracy']:5.1f} \\\\\n"
+        if res['config'] == 'Spatial Position only ($S_U$)' or res['config'] == 'Gap + Spatial (AND)':
             latex += r"\midrule" + "\n"
     
     num_impostor = len(df[df['genuine'] == False])
@@ -121,7 +144,8 @@ def generate_table_III(df):
 """
     latex += f"\\\\[2pt]\n\\scriptsize FAR: {final_result['FP']} false accepts / {num_impostor} impostor attempts.\\\\\n"
     latex += f"\\scriptsize FRR: {final_result['FN']} false rejects / {num_genuine} genuine attempts.\\\\\n"
-    latex += r"""\scriptsize Simulation using empirically-derived sensor noise models.
+    latex += r"""\scriptsize Hybrid fusion: Sequential + Weighted AND-Check. \\
+\scriptsize Thresholds: $\tau_V=45, \tau_G=50, \tau_M=55, \tau_U=55$, weighted threshold $=58$.
 \end{table}
 """
     
@@ -131,9 +155,54 @@ def generate_table_III(df):
     print(f"✅ Table III saved to {OUTPUT_TABLE_III}\n")
     return results
 
+def generate_correlation_table(df):
+    """Generate correlation matrix for all 4 layers"""
+    print("=== Computing Score Correlations ===\n")
+    
+    scores = df[['S_V', 'S_G', 'S_M', 'S_U']]
+    corr_matrix = scores.corr(method='pearson')
+    
+    print("Correlation Matrix:")
+    print(corr_matrix.round(3))
+    print()
+    
+    latex = r"""\begin{table}[h]
+\centering
+\caption{Per-Layer Score Correlation (Pearson $r$, N=280)}
+\label{tab:correlation}
+\scriptsize
+\begin{tabular}{lrrrr}
+\toprule
+& \textbf{Voice ($S_V$)} & \textbf{Gap ($S_G$)} & \textbf{Mech. ($S_M$)} & \textbf{Spatial ($S_U$)} \\
+\midrule
+"""
+    
+    labels = ['Voice ($S_V$)', 'Gap ($S_G$)', 'Mech. ($S_M$)', 'Spatial ($S_U$)']
+    for i, label in enumerate(labels):
+        row = [label]
+        for j in range(4):
+            val = corr_matrix.iloc[i, j]
+            row.append(f"{val:.2f}")
+        latex += " & ".join(row) + " \\\\\n"
+    
+    latex += r"""\bottomrule
+\end{tabular}
+\\[2pt]
+\scriptsize Low correlations ($|r| < 0.4$) indicate independent layers.
+\end{table}
+"""
+    
+    corr_file = os.path.join(RESULTS_DIR, "table_correlation.tex")
+    with open(corr_file, 'w') as f:
+        f.write(latex)
+    
+    print(f"✅ Correlation table saved to {corr_file}\n")
+    return corr_matrix
+
 def main():
     print("\n" + "=" * 60)
-    print("FHG AUTHENTICATION SYSTEM - SIMULATION ANALYSIS")
+    print("HYBRID AUTHENTICATION SYSTEM - SIMULATION ANALYSIS")
+    print("(4 Layers: Voice + Spatial Gap + Mechanical + Spatial)")
     print("=" * 60 + "\n")
     
     df = load_data()
@@ -142,8 +211,21 @@ def main():
         return
     
     results = generate_table_III(df)
+    corr_matrix = generate_correlation_table(df)
+    
+    print("=" * 60)
     print("✅ Analysis complete!")
     print(f"✅ Results saved to {RESULTS_DIR}")
+    print("=" * 60)
+    
+    # Print final summary
+    final = results[-1]
+    print(f"\n=== FINAL PERFORMANCE SUMMARY ===")
+    print(f"Hybrid Fusion (Voice + Spatial Gap + Mechanical + Spatial Position)")
+    print(f"  FAR:  {final['FAR']:.3f}%")
+    print(f"  FRR:  {final['FRR']:.1f}%")
+    print(f"  EER:  {final['EER']:.1f}%")
+    print(f"  Acc:  {final['Accuracy']:.1f}%")
 
 if __name__ == "__main__":
     main()
