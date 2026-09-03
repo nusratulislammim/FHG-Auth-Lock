@@ -1,0 +1,9 @@
+configuration=Voice + Gap
+tau_V=20
+tau_G=20
+tau_T=72
+w_V=0.95
+w_G=0.05
+FAR=0.8889
+FRR=1.7778
+AER=1.3333

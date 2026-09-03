@@ -1,0 +1,11 @@
+configuration=All 3 Layers (Constrained)
+tau_V=62
+tau_G=32
+tau_M=25
+tau_T=40
+w_V=0.2500
+w_G=0.2500
+w_M=0.5000
+FAR=0.8889
+FRR=71.6667
+AER=36.2778

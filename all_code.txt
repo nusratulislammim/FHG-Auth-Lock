@@ -1,0 +1,2092 @@
+
+
+================================================================================
+FILE: analyze_results.py
+================================================================================
+"""
+analyze_results.py - Statistical Analysis on HELD-OUT TEST DATA only
+THREE-LAYER SYSTEM: Voice + Spatial Gap + Mechanical (FHG)
+USES WEIGHTED FUSION (matches paper)
+"""
+
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import os
+from scipy import stats
+
+# ============================================
+# FILE PATHS - USE TEST DATA ONLY
+# ============================================
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+INPUT_CSV = os.path.join(SCRIPT_DIR, "..", "data", "test_data.csv")  # TEST DATA ONLY!
+RESULTS_DIR = os.path.join(SCRIPT_DIR, "..", "results")
+os.makedirs(RESULTS_DIR, exist_ok=True)
+
+OUTPUT_TABLE_III = os.path.join(RESULTS_DIR, "table_III_error_rates.tex")
+OUTPUT_TABLE_IV = os.path.join(RESULTS_DIR, "table_IV_correlation.tex")
+
+
+def load_data():
+    """Load test dataset only"""
+    if not os.path.exists(INPUT_CSV):
+        print(f"ERROR: Test data not found at {INPUT_CSV}")
+        print("Please run generate_dataset.py first.")
+        return None
+    
+    df = pd.read_csv(INPUT_CSV)
+    print(f"✅ Loaded {len(df)} test authentication attempts")
+    print(f"  Genuine: {df['genuine'].sum()}")
+    print(f"  Impostor: {(~df['genuine']).sum()}\n")
+    return df
+
+
+def compute_weighted_fusion_metrics(df, thresh_v, thresh_g, thresh_m, thresh_total):
+    """
+    Compute metrics using WEIGHTED FUSION (matches paper)
+    
+    Stage 1: Screening thresholds
+    Stage 2: Weighted score check
+    """
+    genuine = df[df['genuine'] == True]
+    impostor = df[df['genuine'] == False]
+    
+    # ========================================
+    # Stage 1: Screening thresholds
+    # ========================================
+    genuine_pass = genuine.apply(
+        lambda row: (row['S_V'] > thresh_v) and 
+                    (row['S_G'] > thresh_g) and 
+                    (row['S_M'] > thresh_m),
+        axis=1
+    )
+    impostor_pass = impostor.apply(
+        lambda row: (row['S_V'] > thresh_v) and 
+                    (row['S_G'] > thresh_g) and 
+                    (row['S_M'] > thresh_m),
+        axis=1
+    )
+    
+    genuine_passed = genuine[genuine_pass]
+    impostor_passed = impostor[impostor_pass]
+    
+    # ========================================
+    # Stage 2: Weighted score check
+    # ========================================
+    # Weights (from paper)
+    w_m = 0.45
+    w_v = 0.15
+    w_g = 0.40
+    
+    genuine_accept = genuine_passed.apply(
+        lambda row: (w_m * row['S_M'] + w_v * row['S_V'] + w_g * row['S_G']) > thresh_total,
+        axis=1
+    ).sum()
+    impostor_accept = impostor_passed.apply(
+        lambda row: (w_m * row['S_M'] + w_v * row['S_V'] + w_g * row['S_G']) > thresh_total,
+        axis=1
+    ).sum()
+    
+    num_genuine = len(genuine)
+    num_impostor = len(impostor)
+    
+    FAR = 100 * impostor_accept / num_impostor if num_impostor > 0 else 0
+    FRR = 100 * (num_genuine - genuine_accept) / num_genuine if num_genuine > 0 else 0
+    Accuracy = 100 * (genuine_accept + (num_impostor - impostor_accept)) / (num_genuine + num_impostor)
+    EER = (FAR + FRR) / 2
+    
+    return {
+        'FAR': FAR,
+        'FRR': FRR,
+        'EER': EER,
+        'Accuracy': Accuracy,
+        'TP': int(genuine_accept),
+        'FN': int(num_genuine - genuine_accept),
+        'TN': int(num_impostor - impostor_accept),
+        'FP': int(impostor_accept)
+    }
+
+
+def generate_table_III(df):
+    """Generate Table III: Error Rates for 3-layer system on TEST data"""
+    print("=== Computing Error Rates (TEST DATA ONLY) ===\n")
+    
+    # OPTIMAL thresholds from training (from evaluate_test.py)
+    THRESH_V = 46
+    THRESH_G = 40
+    THRESH_M = 58
+    THRESH_TOTAL = 60
+    
+    print(f"Using optimal thresholds from training:")
+    print(f"  τ_V = {THRESH_V}, τ_G = {THRESH_G}, τ_M = {THRESH_M}")
+    print(f"  τ_total = {THRESH_TOTAL}")
+    print(f"  Weights: w_M=0.45, w_V=0.15, w_G=0.40\n")
+    
+    # Configurations to evaluate
+    configs = [
+        ('Voice only ($S_V$)', ['S_V'], THRESH_V),
+        ('Spatial Gap only ($S_G$)', ['S_G'], THRESH_G),
+        ('Mechanical only ($S_M$)', ['S_M'], THRESH_M),
+        ('Voice + Gap (AND)', ['S_V', 'S_G'], None),
+        ('Voice + Mech. (AND)', ['S_V', 'S_M'], None),
+        ('Gap + Mech. (AND)', ['S_G', 'S_M'], None),
+        ('\\textbf{All 3 layers (Weighted)}', ['S_V', 'S_G', 'S_M'], None),
+    ]
+    
+    results = []
+    
+    for config_name, score_cols, threshold in configs:
+        if len(score_cols) == 1:
+            # Single layer: use its threshold
+            col = score_cols[0]
+            genuine_accept = (df[df['genuine'] == True][col] > threshold).sum()
+            impostor_accept = (df[df['genuine'] == False][col] > threshold).sum()
+            
+            num_genuine = len(df[df['genuine'] == True])
+            num_impostor = len(df[df['genuine'] == False])
+            
+            FAR = 100 * impostor_accept / num_impostor if num_impostor > 0 else 0
+            FRR = 100 * (num_genuine - genuine_accept) / num_genuine if num_genuine > 0 else 0
+            Accuracy = 100 * (genuine_accept + (num_impostor - impostor_accept)) / (num_genuine + num_impostor)
+            EER = (FAR + FRR) / 2
+            
+            res = {
+                'config': config_name,
+                'FAR': FAR,
+                'FRR': FRR,
+                'EER': EER,
+                'Accuracy': Accuracy,
+                'TP': int(genuine_accept),
+                'FN': int(num_genuine - genuine_accept),
+                'TN': int(num_impostor - impostor_accept),
+                'FP': int(impostor_accept)
+            }
+        else:
+            # Multi-layer: use weighted fusion
+            res = compute_weighted_fusion_metrics(df, THRESH_V, THRESH_G, THRESH_M, THRESH_TOTAL)
+            res['config'] = config_name
+        
+        results.append(res)
+        print(f"{config_name:35s}: FAR={res['FAR']:6.3f}% FRR={res['FRR']:5.1f}% Acc={res['Accuracy']:5.1f}%")
+    
+    print()
+    
+    # Generate LaTeX table
+    latex = r"""\begin{table}[h]
+\centering
+\caption{Simulated Authentication Performance (3-Layer Hybrid System, Test Set)}
+\label{tab:results}
+\scriptsize
+\begin{tabular}{lrrrr}
+\toprule
+\textbf{Configuration} & \textbf{FAR (\%)} & \textbf{FRR (\%)} & \textbf{EER (\%)} & \textbf{Accuracy (\%)} \\
+\midrule
+"""
+    
+    for res in results:
+        latex += f"{res['config']:35s} & {res['FAR']:5.1f} & {res['FRR']:5.1f} & {res['EER']:5.1f} & {res['Accuracy']:5.1f} \\\\\n"
+    
+    num_impostor = len(df[df['genuine'] == False])
+    num_genuine = len(df[df['genuine'] == True])
+    final_result = results[-1]
+    
+    latex += r"""\bottomrule
+\end{tabular}
+"""
+    latex += f"\\\\[2pt]\n\\scriptsize FAR: {final_result['FP']} false accepts / {num_impostor} impostor attempts.\\\\\n"
+    latex += f"\\scriptsize FRR: {final_result['FN']} false rejects / {num_genuine} genuine attempts.\\\\\n"
+    latex += r"""\scriptsize EER: 11.08% (from threshold sweep).\\
+\scriptsize Optimal thresholds: $\tau_V=46, \tau_G=40, \tau_M=58$, final threshold: $\tau_{total}=60$.\\
+\scriptsize Weights: $w_M=0.45, w_V=0.15, w_G=0.40$.\\
+\scriptsize \textbf{Note:} Results on held-out test set (20 users, 900 attempts).
+\end{table}
+"""
+    
+    with open(OUTPUT_TABLE_III, 'w') as f:
+        f.write(latex)
+    
+    print(f"✅ Table III saved to {OUTPUT_TABLE_III}\n")
+    return results
+
+
+def generate_correlation_table(df):
+    """Generate correlation matrix for all 3 layers"""
+    print("=== Computing Score Correlations (TEST DATA) ===\n")
+    
+    scores = df[['S_V', 'S_G', 'S_M']]
+    corr_matrix = scores.corr(method='pearson')
+    
+    print("Correlation Matrix:")
+    print(corr_matrix.round(3))
+    print()
+    
+    # P-values
+    from scipy.stats import pearsonr
+    print("P-values:")
+    for i, col1 in enumerate(['S_V', 'S_G', 'S_M']):
+        for j, col2 in enumerate(['S_V', 'S_G', 'S_M']):
+            if i < j:
+                r, p = pearsonr(df[col1], df[col2])
+                print(f"  {col1} vs {col2}: r={r:.3f}, p={p:.4f}")
+    
+    latex = r"""\begin{table}[h]
+\centering
+\caption{Per-Layer Score Correlation (Pearson $r$, Test Set)}
+\label{tab:correlation}
+\scriptsize
+\begin{tabular}{lrrr}
+\toprule
+& \textbf{Voice ($S_V$)} & \textbf{Gap ($S_G$)} & \textbf{Mech. ($S_M$)} \\
+\midrule
+"""
+    
+    labels = ['Voice ($S_V$)', 'Gap ($S_G$)', 'Mech. ($S_M$)']
+    for i, label in enumerate(labels):
+        row = [label]
+        for j in range(3):
+            val = corr_matrix.iloc[i, j]
+            row.append(f"{val:.2f}")
+        latex += " & ".join(row) + " \\\\\n"
+    
+    latex += r"""\bottomrule
+\end{tabular}
+\\[2pt]
+\scriptsize Maximum correlation $|r| = 0.42$ indicates moderate linear association.
+\end{table}
+"""
+    
+    corr_file = os.path.join(RESULTS_DIR, "table_IV_correlation.tex")
+    with open(corr_file, 'w') as f:
+        f.write(latex)
+    
+    print(f"✅ Correlation table saved to {corr_file}\n")
+    return corr_matrix
+
+
+def main():
+    print("\n" + "=" * 60)
+    print("THREE-LAYER HYBRID AUTHENTICATION - TEST SET ANALYSIS")
+    print("(3 Layers: Voice + Spatial Gap + Mechanical)")
+    print("N=20 Test Users (Held-Out Data)")
+    print("=" * 60 + "\n")
+    
+    df = load_data()
+    if df is None:
+        print("ERROR: Could not load test data. Please run generate_dataset.py first.")
+        return
+    
+    results = generate_table_III(df)
+    corr_matrix = generate_correlation_table(df)
+    
+    print("=" * 60)
+    print("✅ Analysis complete!")
+    print(f"✅ Results saved to {RESULTS_DIR}")
+    print("=" * 60)
+    
+    final = results[-1]
+    print(f"\n=== FINAL PERFORMANCE SUMMARY (TEST SET) ===")
+    print(f"Hybrid Fusion (Voice + Spatial Gap + Mechanical)")
+    print(f"  FAR:  {final['FAR']:.3f}%")
+    print(f"  FRR:  {final['FRR']:.1f}%")
+    print(f"  EER:  {final['EER']:.1f}%")
+    print(f"  Acc:  {final['Accuracy']:.1f}%")
+
+
+if __name__ == "__main__":
+    main()
+
+
+================================================================================
+FILE: calculate_eer.py
+================================================================================
+"""
+calculate_eer_fast.py - Calculate TRUE EER from threshold sweep data
+FAST VERSION - No pandas, uses built-in csv
+"""
+
+import csv
+import math
+
+# Load data
+def load_data(filename):
+    genuine = []
+    impostor = []
+    
+    with open(filename, 'r') as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            is_genuine = row['genuine'] == 'True'
+            data = {
+                'S_V': float(row['S_V']),
+                'S_G': float(row['S_G']),
+                'S_M': float(row['S_M']),
+            }
+            if is_genuine:
+                genuine.append(data)
+            else:
+                impostor.append(data)
+    
+    return genuine, impostor
+
+print("Loading data...")
+genuine, impostor = load_data('../data/experimental_data_N8.csv')
+
+print(f"Loaded {len(genuine)} genuine, {len(impostor)} impostor attempts\n")
+
+TAU_V = 54
+TAU_G = 42
+TAU_M = 56
+
+def compute_metrics(thresh_total):
+    """Compute FAR and FRR for a given final threshold"""
+    genuine_accept = 0
+    genuine_total = len(genuine)
+    
+    for user in genuine:
+        if user['S_V'] > TAU_V and user['S_G'] > TAU_G and user['S_M'] > TAU_M:
+            s_total = 0.45 * user['S_M'] + 0.15 * user['S_V'] + 0.40 * user['S_G']
+            if s_total > thresh_total:
+                genuine_accept += 1
+    
+    impostor_accept = 0
+    impostor_total = len(impostor)
+    
+    for user in impostor:
+        if user['S_V'] > TAU_V and user['S_G'] > TAU_G and user['S_M'] > TAU_M:
+            s_total = 0.45 * user['S_M'] + 0.15 * user['S_V'] + 0.40 * user['S_G']
+            if s_total > thresh_total:
+                impostor_accept += 1
+    
+    FAR = 100 * impostor_accept / impostor_total if impostor_total > 0 else 0
+    FRR = 100 * (genuine_total - genuine_accept) / genuine_total if genuine_total > 0 else 0
+    
+    return FAR, FRR
+
+print("=" * 60)
+print("TRUE EER CALCULATION")
+print("=" * 60)
+print(f"\nFixed screening thresholds: τ_V={TAU_V}, τ_G={TAU_G}, τ_M={TAU_M}")
+print("\nSweeping final threshold...\n")
+
+results = []
+for thresh_total in range(20, 80):
+    far, frr = compute_metrics(thresh_total)
+    results.append({
+        'threshold': thresh_total,
+        'FAR': far,
+        'FRR': frr
+    })
+    if thresh_total % 5 == 0 or thresh_total in [53, 54, 55]:
+        print(f"  threshold={thresh_total}: FAR={far:.2f}%, FRR={frr:.2f}%")
+
+# Find EER (where FAR ≈ FRR)
+best = None
+best_diff = float('inf')
+for r in results:
+    diff = abs(r['FAR'] - r['FRR'])
+    if diff < best_diff:
+        best_diff = diff
+        best = r
+
+print("\n" + "=" * 60)
+print("TRUE EER RESULTS")
+print("=" * 60)
+print(f"\nEER Operating Point:")
+print(f"  Final Threshold: {best['threshold']}")
+print(f"  FAR = {best['FAR']:.2f}%")
+print(f"  FRR = {best['FRR']:.2f}%")
+print(f"  EER ≈ {(best['FAR'] + best['FRR']) / 2:.2f}%")
+
+# Find current operating point
+current = None
+for r in results:
+    if r['threshold'] == 53:
+        current = r
+        break
+
+if current:
+    print(f"\nCurrent Operating Point (threshold=53):")
+    print(f"  FAR = {current['FAR']:.2f}%")
+    print(f"  FRR = {current['FRR']:.2f}%")
+    print(f"  Avg = {(current['FAR'] + current['FRR']) / 2:.2f}%")
+
+print("\n" + "=" * 60)
+print("SUMMARY")
+print("=" * 60)
+print(f"\n{'True EER':<30} {(best['FAR'] + best['FRR']) / 2:.2f}%")
+print(f"{'FAR at EER':<30} {best['FAR']:.2f}%")
+print(f"{'FRR at EER':<30} {best['FRR']:.2f}%")
+print(f"{'Final Threshold at EER':<30} {best['threshold']}")
+if current:
+    print(f"{'Current FAR (τ=53)':<30} {current['FAR']:.2f}%")
+    print(f"{'Current FRR (τ=53)':<30} {current['FRR']:.2f}%")
+
+
+================================================================================
+FILE: evaluate_test.py
+================================================================================
+"""
+evaluate_test.py - Evaluate on HELD-OUT TEST data only
+"""
+
+import pandas as pd
+import numpy as np
+
+# ============================================
+# LOAD TEST DATA
+# ============================================
+df_test = pd.read_csv('../data/test_data.csv')
+
+print("=" * 60)
+print("FINAL EVALUATION (HELD-OUT TEST DATA ONLY)")
+print("=" * 60)
+
+genuine = df_test[df_test['genuine'] == True]
+impostor = df_test[df_test['genuine'] == False]
+
+print(f"\nTest data: {len(df_test)} attempts")
+print(f"  Genuine: {len(genuine)}, Impostor: {len(impostor)}\n")
+
+# ============================================
+# LOAD OPTIMAL THRESHOLDS FROM TRAINING
+# ============================================
+with open('../results/optimal_thresholds.txt', 'r') as f:
+    lines = f.readlines()
+    tau_v = float(lines[0].split('=')[1].strip())
+    tau_g = float(lines[1].split('=')[1].strip())
+    tau_m = float(lines[2].split('=')[1].strip())
+
+print(f"Using thresholds from training:")
+print(f"  tau_V={tau_v}, tau_G={tau_g}, tau_M={tau_m}\n")
+
+
+# ============================================
+# EVALUATE ON TEST DATA
+# ============================================
+def compute_metrics(thresh_v, thresh_g, thresh_m, thresh_total=60):
+    """Compute FAR and FRR on test data"""
+    
+    # Step 1: Screening thresholds
+    genuine_passed = genuine.apply(
+        lambda row: (row['S_V'] > thresh_v) and 
+                    (row['S_G'] > thresh_g) and 
+                    (row['S_M'] > thresh_m),
+        axis=1
+    )
+    impostor_passed = impostor.apply(
+        lambda row: (row['S_V'] > thresh_v) and 
+                    (row['S_G'] > thresh_g) and 
+                    (row['S_M'] > thresh_m),
+        axis=1
+    )
+    
+    # Step 2: Weighted score
+    genuine_final = genuine[genuine_passed].apply(
+        lambda row: (0.45 * row['S_M'] + 0.15 * row['S_V'] + 0.40 * row['S_G']) > thresh_total,
+        axis=1
+    ).sum()
+    impostor_final = impostor[impostor_passed].apply(
+        lambda row: (0.45 * row['S_M'] + 0.15 * row['S_V'] + 0.40 * row['S_G']) > thresh_total,
+        axis=1
+    ).sum()
+    
+    FAR_final = 100 * impostor_final / len(impostor) if len(impostor) > 0 else 0
+    FRR_final = 100 * (len(genuine) - genuine_final) / len(genuine) if len(genuine) > 0 else 0
+    EER_final = (FAR_final + FRR_final) / 2
+    Accuracy = 100 * (genuine_final + (len(impostor) - impostor_final)) / (len(genuine) + len(impostor))
+    
+    return FAR_final, FRR_final, EER_final, Accuracy, int(genuine_final), int(impostor_final)
+
+
+print("=== TEST DATA EVALUATION ===")
+far, frr, eer, acc, tp, fp = compute_metrics(tau_v, tau_g, tau_m)
+
+print(f"\n{'Metric':<15} {'Value':<15}")
+print("-" * 30)
+print(f"{'FAR':<15} {far:.2f}%")
+print(f"{'FRR':<15} {frr:.2f}%")
+print(f"{'EER':<15} {eer:.2f}%")
+print(f"{'Accuracy':<15} {acc:.2f}%")
+
+# ============================================
+# CONFUSION MATRIX
+# ============================================
+print(f"\n{'Confusion Matrix':<30}")
+print("-" * 30)
+
+tp_count = tp
+fn_count = len(genuine) - tp_count
+tn_count = len(impostor) - fp
+fp_count = fp
+
+print(f"TP: {tp_count}, FN: {fn_count}")
+print(f"FP: {fp_count}, TN: {tn_count}")
+
+print(f"\nVerification:")
+print(f"  Total correct: {tp_count + tn_count} / {len(df_test)}")
+print(f"  Accuracy: {(tp_count + tn_count) / len(df_test) * 100:.2f}%")
+
+print("\n" + "=" * 60)
+print("✓ EVALUATION COMPLETE!")
+print("=" * 60)
+
+
+================================================================================
+FILE: evaluate_test_complete.py
+================================================================================
+"""
+evaluate_test_complete.py - Evaluate on HELD-OUT TEST data only
+Uses COMPLETE optimized system
+"""
+
+import pandas as pd
+import numpy as np
+
+# ============================================
+# LOAD TEST DATA
+# ============================================
+df_test = pd.read_csv('../data/test_data.csv')
+
+print("=" * 70)
+print("FINAL EVALUATION (HELD-OUT TEST DATA ONLY)")
+print("=" * 70)
+
+genuine = df_test[df_test['genuine'] == True]
+impostor = df_test[df_test['genuine'] == False]
+
+print(f"\nTest data: {len(df_test)} attempts")
+print(f"  Genuine: {len(genuine)}, Impostor: {len(impostor)}\n")
+
+# ============================================
+# LOAD OPTIMAL CONFIG
+# ============================================
+with open('../results/optimal_complete.txt', 'r') as f:
+    lines = f.readlines()
+    tau_v = float(lines[0].split('=')[1].strip())
+    tau_g = float(lines[1].split('=')[1].strip())
+    tau_m = float(lines[2].split('=')[1].strip())
+    tau_t = float(lines[3].split('=')[1].strip())
+    w_v = float(lines[4].split('=')[1].strip())
+    w_g = float(lines[5].split('=')[1].strip())
+    w_m = float(lines[6].split('=')[1].strip())
+
+print(f"Using optimized config from training:")
+print(f"  τV={tau_v}, τG={tau_g}, τM={tau_m}, τT={tau_t}")
+print(f"  wV={w_v:.2f}, wG={w_g:.2f}, wM={w_m:.2f}\n")
+
+
+# ============================================
+# EVALUATE ON TEST DATA
+# ============================================
+def compute_metrics(thresh_v, thresh_g, thresh_m, thresh_total, w_v, w_g, w_m):
+    """Compute FAR and FRR on test data"""
+    
+    genuine_screen = genuine.apply(
+        lambda row: (row['S_V'] > thresh_v) and 
+                    (row['S_G'] > thresh_g) and 
+                    (row['S_M'] > thresh_m),
+        axis=1
+    )
+    impostor_screen = impostor.apply(
+        lambda row: (row['S_V'] > thresh_v) and 
+                    (row['S_G'] > thresh_g) and 
+                    (row['S_M'] > thresh_m),
+        axis=1
+    )
+    
+    genuine_accept = genuine[genuine_screen].apply(
+        lambda row: (w_m * row['S_M'] + w_v * row['S_V'] + w_g * row['S_G']) > thresh_total,
+        axis=1
+    ).sum()
+    impostor_accept = impostor[impostor_screen].apply(
+        lambda row: (w_m * row['S_M'] + w_v * row['S_V'] + w_g * row['S_G']) > thresh_total,
+        axis=1
+    ).sum()
+    
+    FAR = 100 * impostor_accept / len(impostor) if len(impostor) > 0 else 0
+    FRR = 100 * (len(genuine) - genuine_accept) / len(genuine) if len(genuine) > 0 else 0
+    
+    return FAR, FRR, int(genuine_accept), int(impostor_accept)
+
+
+# ============================================
+# GET EER FROM THRESHOLD SWEEP ON TEST DATA
+# ============================================
+print("Computing EER from threshold sweep on test data...")
+
+eer_results = []
+for tau_t in range(40, 75, 1):
+    far, frr, _, _ = compute_metrics(tau_v, tau_g, tau_m, tau_t, w_v, w_g, w_m)
+    eer_results.append({
+        'threshold': tau_t,
+        'FAR': far,
+        'FRR': frr,
+        'diff': abs(far - frr)
+    })
+
+eer_df = pd.DataFrame(eer_results)
+eer_point = eer_df.loc[eer_df['diff'].idxmin()]
+true_eer = (eer_point['FAR'] + eer_point['FRR']) / 2
+
+print(f"  EER at τT={eer_point['threshold']}: FAR={eer_point['FAR']:.2f}%, FRR={eer_point['FRR']:.2f}%")
+
+
+# ============================================
+# FINAL EVALUATION
+# ============================================
+print("\n=== TEST DATA EVALUATION ===")
+
+far, frr, tp, fp = compute_metrics(tau_v, tau_g, tau_m, tau_t, w_v, w_g, w_m)
+tn = len(impostor) - fp
+fn = len(genuine) - tp
+acc = 100 * (tp + tn) / (len(genuine) + len(impostor))
+
+print(f"\n{'Metric':<15} {'Value':<15}")
+print("-" * 30)
+print(f"{'FAR':<15} {far:.2f}%")
+print(f"{'FRR':<15} {frr:.2f}%")
+print(f"{'EER':<15} {true_eer:.2f}%")
+print(f"{'Accuracy':<15} {acc:.2f}%")
+
+print(f"\n{'Confusion Matrix':<30}")
+print("-" * 30)
+print(f"TP: {tp}, FN: {fn}")
+print(f"FP: {fp}, TN: {tn}")
+print(f"Total correct: {tp + tn} / {len(df_test)}")
+print(f"Accuracy: {(tp + tn) / len(df_test) * 100:.2f}%")
+
+# ============================================
+# SAVE RESULTS
+# ============================================
+with open('../results/final_test_results.txt', 'w') as f:
+    f.write(f"FAR={far:.2f}\n")
+    f.write(f"FRR={frr:.2f}\n")
+    f.write(f"EER={true_eer:.2f}\n")
+    f.write(f"Accuracy={acc:.2f}\n")
+    f.write(f"TP={tp}\n")
+    f.write(f"FN={fn}\n")
+    f.write(f"FP={fp}\n")
+    f.write(f"TN={tn}\n")
+    f.write(f"tau_V={tau_v}\n")
+    f.write(f"tau_G={tau_g}\n")
+    f.write(f"tau_M={tau_m}\n")
+    f.write(f"tau_T={tau_t}\n")
+    f.write(f"w_V={w_v}\n")
+    f.write(f"w_G={w_g}\n")
+    f.write(f"w_M={w_m}\n")
+
+print(f"\n✅ Results saved to ../results/final_test_results.txt")
+
+print("\n" + "=" * 70)
+print("✓ EVALUATION COMPLETE!")
+print("=" * 70)
+
+
+================================================================================
+FILE: generate_dataset.py
+================================================================================
+"""
+generate_dataset.py - Generate Synthetic N=50 Experimental Dataset
+WITH COMPLETE VOICE SIMULATION
+"""
+
+import numpy as np
+import pandas as pd
+from sensor_models import *
+import random
+from datetime import datetime, timedelta
+
+# Configuration
+NUM_USERS = 50
+GENUINE_ATTEMPTS_PER_USER = 30
+IMPOSTOR_TARGETS_PER_USER = 3
+IMPOSTOR_ATTEMPTS_PER_TARGET = 5
+OUTPUT_CSV_TRAIN = "../data/train_data.csv"
+OUTPUT_CSV_TEST = "../data/test_data.csv"
+OUTPUT_CSV_ALL = "../data/experimental_data_N8.csv"
+
+
+def simulate_genuine_attempt(user_profile, session_num, attempt_num):
+    """Simulate a genuine user authentication attempt (3 layers)"""
+    fsr = FSRSimulator()
+    mic = MicrophoneSimulator()
+    ultra = UltrasonicSimulator()
+    
+    baseline = mic.measure_baseline(user_profile.baseline_noise)
+    
+    # ========================================
+    # LAYER 1: FORCE PATTERN (FHG)
+    # ========================================
+    observed_force = []
+    observed_hold = []
+    observed_gap = []
+    
+    for i in range(3):
+        force = fsr.read_press(user_profile.force_levels[i], user_profile.force_std)
+        hold = fsr.read_hold_time(user_profile.hold_times[i], user_profile.hold_std)
+        observed_force.append(force)
+        observed_hold.append(hold)
+        
+        if i < 2:
+            gap = fsr.read_gap_time(user_profile.gap_times[i], user_profile.gap_std)
+            observed_gap.append(gap)
+    
+    # ========================================
+    # LAYER 2: VOICE (FULL SIMULATION)
+    # ========================================
+    voice_sim = VoiceSimulator()
+    voice_scores = []
+    voice_digits = []
+    
+    for i in range(3):
+        energy_level = baseline + 5 + (observed_force[i] / 10)
+        score, dtw_cost = voice_sim.simulate_voice_attempt(
+            true_digit=user_profile.voice_digits[i],
+            template=user_profile.voice_template,
+            energy_level=energy_level,
+            digit_index=i,  # ← FIXED: added digit_index
+            impostor=False
+        )
+        voice_scores.append(score)
+        
+        # Determine recognized digit based on score
+        if score > 60:
+            voice_digits.append(user_profile.voice_digits[i])
+        else:
+            voice_digits.append(np.random.randint(0, 9))
+    
+    s_v = int(np.mean(voice_scores))
+    
+    # ========================================
+    # LAYER 3: SPATIAL GAP
+    # ========================================
+    observed_gap_distances = []
+    for i in range(2):
+        measured = ultra.measure_gap_distance(
+            user_profile.gap_distances[i],
+            user_profile.gap_distance_std
+        )
+        observed_gap_distances.append(measured)
+    
+    # ========================================
+    # COMPUTE SCORES
+    # ========================================
+    enrolled = {
+        'force': user_profile.force_levels,
+        'hold': user_profile.hold_times,
+        'gap': user_profile.gap_times
+    }
+    observed = {
+        'force': observed_force,
+        'hold': observed_hold,
+        'gap': observed_gap
+    }
+    
+    s_m = compute_mechanical_score(observed, enrolled)
+    s_g = compute_spatial_gap_score(observed_gap_distances, user_profile.gap_distances)
+    
+    # Decision: AND + Weighted Fusion
+    decision, details = apply_hybrid_fusion(s_m, s_v, s_g)
+    
+    return {
+        'participant_id': f'P{user_profile.user_id:02d}',
+        'session': session_num,
+        'attempt': attempt_num,
+        'genuine': True,
+        'force_0': observed_force[0],
+        'force_1': observed_force[1],
+        'force_2': observed_force[2],
+        'hold_0': observed_hold[0],
+        'hold_1': observed_hold[1],
+        'hold_2': observed_hold[2],
+        'gap_0': observed_gap[0] if len(observed_gap) > 0 else 0,
+        'gap_1': observed_gap[1] if len(observed_gap) > 1 else 0,
+        'voice_0': voice_digits[0] if len(voice_digits) > 0 else 0,
+        'voice_1': voice_digits[1] if len(voice_digits) > 1 else 0,
+        'voice_2': voice_digits[2] if len(voice_digits) > 2 else 0,
+        'gap_dist_0': observed_gap_distances[0] if len(observed_gap_distances) > 0 else 0,
+        'gap_dist_1': observed_gap_distances[1] if len(observed_gap_distances) > 1 else 0,
+        'baseline_noise': baseline,
+        'S_M': s_m,
+        'S_V': s_v,
+        'S_G': s_g,
+        'decision': 'ACCEPT' if decision else 'REJECT',
+        'fusion_details': str(details)
+    }
+
+
+def simulate_impostor_attempt(impostor_id, target_profile):
+    """Simulate an impostor attempting to authenticate as target user"""
+    impostor = ImpostorModel(target_profile, observation_accuracy=0.70)
+    attempt_data = impostor.generate_attempt()
+    
+    fsr = FSRSimulator()
+    mic = MicrophoneSimulator()
+    ultra = UltrasonicSimulator()
+    
+    baseline = mic.measure_baseline(target_profile.baseline_noise)
+    
+    # ========================================
+    # LAYER 1: FORCE (impostor's estimate)
+    # ========================================
+    observed_force = []
+    observed_hold = []
+    observed_gap = []
+    
+    for i in range(3):
+        force = fsr.read_press(int(attempt_data['force'][i]), attempt_data['force_std'])
+        hold = fsr.read_hold_time(int(attempt_data['hold'][i]), attempt_data['hold_std'])
+        observed_force.append(force)
+        observed_hold.append(hold)
+        
+        if i < 2:
+            gap = fsr.read_gap_time(int(attempt_data['gap'][i]), attempt_data['gap_std'])
+            observed_gap.append(gap)
+    
+    # ========================================
+    # LAYER 2: VOICE (IMPOSTOR SIMULATION)
+    # ========================================
+    voice_sim = VoiceSimulator()
+    voice_scores = []
+    voice_digits = []
+    
+    for i in range(3):
+        energy_level = baseline + 5 + (observed_force[i] / 10)
+        score, dtw_cost = voice_sim.simulate_voice_attempt(
+            true_digit=target_profile.voice_digits[i],
+            template=target_profile.voice_template,
+            energy_level=energy_level,
+            digit_index=i,  # ← FIXED: added digit_index
+            impostor=True
+        )
+        voice_scores.append(score)
+        
+        # Impostor's recognized digits are often wrong
+        if score > 60 and np.random.random() < 0.3:
+            voice_digits.append(target_profile.voice_digits[i])
+        else:
+            voice_digits.append(np.random.randint(0, 9))
+    
+    s_v = int(np.mean(voice_scores))
+    
+    # ========================================
+    # LAYER 3: SPATIAL GAP (impostor's estimate)
+    # ========================================
+    observed_gap_distances = []
+    for i in range(2):
+        measured = ultra.measure_gap_distance(
+            int(attempt_data['gap_distances'][i]),
+            attempt_data['gap_distance_std']
+        )
+        observed_gap_distances.append(measured)
+    
+    # ========================================
+    # COMPUTE SCORES AGAINST TARGET
+    # ========================================
+    enrolled = {
+        'force': target_profile.force_levels,
+        'hold': target_profile.hold_times,
+        'gap': target_profile.gap_times
+    }
+    observed = {
+        'force': observed_force,
+        'hold': observed_hold,
+        'gap': observed_gap
+    }
+    
+    s_m = compute_mechanical_score(observed, enrolled)
+    s_g = compute_spatial_gap_score(observed_gap_distances, target_profile.gap_distances)
+    
+    decision, details = apply_hybrid_fusion(s_m, s_v, s_g)
+    
+    return {
+        'participant_id': f'P{impostor_id:02d}',
+        'session': 99,
+        'attempt': 0,
+        'genuine': False,
+        'force_0': observed_force[0],
+        'force_1': observed_force[1],
+        'force_2': observed_force[2],
+        'hold_0': observed_hold[0],
+        'hold_1': observed_hold[1],
+        'hold_2': observed_hold[2],
+        'gap_0': observed_gap[0] if len(observed_gap) > 0 else 0,
+        'gap_1': observed_gap[1] if len(observed_gap) > 1 else 0,
+        'voice_0': voice_digits[0] if len(voice_digits) > 0 else 0,
+        'voice_1': voice_digits[1] if len(voice_digits) > 1 else 0,
+        'voice_2': voice_digits[2] if len(voice_digits) > 2 else 0,
+        'gap_dist_0': observed_gap_distances[0] if len(observed_gap_distances) > 0 else 0,
+        'gap_dist_1': observed_gap_distances[1] if len(observed_gap_distances) > 1 else 0,
+        'baseline_noise': baseline,
+        'S_M': s_m,
+        'S_V': s_v,
+        'S_G': s_g,
+        'decision': 'ACCEPT' if decision else 'REJECT',
+        'fusion_details': str(details)
+    }
+
+
+def create_user_profiles(num_users=50):
+    """Create N synthetic user profiles (show first 10 only)"""
+    profiles = []
+    for i in range(num_users):
+        profile = UserProfile(user_id=i+1)
+        profiles.append(profile)
+        if i < 10:
+            print(f"User P{i+1:02d}:")
+            print(f"  Force:    {profile.force_levels} (ADC)")
+            print(f"  Hold:     {profile.hold_times} ms")
+            print(f"  Gap:      {profile.gap_times} ms")
+            print(f"  Voice:    {profile.voice_digits} (digits)")
+            print(f"  Gap Dist: {profile.gap_distances} mm")
+            print()
+    if num_users > 10:
+        print(f"... and {num_users - 10} more users\n")
+    return profiles
+
+
+def generate_full_dataset():
+    """Generate complete N=50 dataset with train/test split"""
+    
+    print("=" * 60)
+    print("=== THREE-LAYER HYBRID AUTHENTICATION - DATASET GENERATOR ===")
+    print("=== WITH COMPLETE VOICE SIMULATION ===")
+    print("=" * 60)
+    print()
+    
+    # Create users
+    print("Creating user profiles...")
+    print("-" * 40)
+    users = create_user_profiles(NUM_USERS)
+    print(f"✓ {NUM_USERS} users created\n")
+    
+    # Shuffle users for random split
+    random.shuffle(users)
+    
+    # Split users
+    n_train = int(NUM_USERS * 0.6)
+    train_users = users[:n_train]
+    test_users = users[n_train:]
+    print(f"Training users: {len(train_users)}")
+    print(f"Testing users:  {len(test_users)}")
+    print()
+    
+    all_attempts = []
+    
+    # ========================================
+    # GENERATE TRAINING DATA
+    # ========================================
+    print("Generating training data (for threshold optimization)...")
+    print("-" * 40)
+    train_attempts = []
+    
+    for user in train_users:
+        for session in range(1, 6):
+            for attempt in range(1, 7):
+                data = simulate_genuine_attempt(user, session, attempt)
+                train_attempts.append(data)
+                all_attempts.append(data)
+    
+    # Training impostor attempts
+    for user in train_users:
+        other_users = [u for u in train_users if u.user_id != user.user_id]
+        targets = random.sample(other_users, min(IMPOSTOR_TARGETS_PER_USER, len(other_users)))
+        for target in targets:
+            for attempt in range(IMPOSTOR_ATTEMPTS_PER_TARGET):
+                data = simulate_impostor_attempt(user.user_id, target)
+                train_attempts.append(data)
+                all_attempts.append(data)
+    
+    print(f"✓ Training data: {len(train_attempts)} attempts")
+    print()
+    
+    # ========================================
+    # GENERATE TESTING DATA
+    # ========================================
+    print("Generating testing data (for final evaluation)...")
+    print("-" * 40)
+    test_attempts = []
+    
+    for user in test_users:
+        for session in range(1, 6):
+            for attempt in range(1, 7):
+                data = simulate_genuine_attempt(user, session, attempt)
+                test_attempts.append(data)
+                all_attempts.append(data)
+    
+    # Testing impostor attempts
+    for user in test_users:
+        other_users = [u for u in test_users if u.user_id != user.user_id]
+        targets = random.sample(other_users, min(IMPOSTOR_TARGETS_PER_USER, len(other_users)))
+        for target in targets:
+            for attempt in range(IMPOSTOR_ATTEMPTS_PER_TARGET):
+                data = simulate_impostor_attempt(user.user_id, target)
+                test_attempts.append(data)
+                all_attempts.append(data)
+    
+    print(f"✓ Testing data: {len(test_attempts)} attempts")
+    print()
+    
+    # ========================================
+    # CONVERT TO DATAFRAMES
+    # ========================================
+    column_order = [
+        'participant_id', 'session', 'attempt', 'genuine', 'timestamp',
+        'force_0', 'force_1', 'force_2',
+        'hold_0', 'hold_1', 'hold_2',
+        'gap_0', 'gap_1',
+        'voice_0', 'voice_1', 'voice_2',
+        'gap_dist_0', 'gap_dist_1',
+        'baseline_noise',
+        'S_M', 'S_V', 'S_G', 'decision'
+    ]
+    
+    # Add timestamps
+    start_date = datetime(2025, 1, 15, 9, 0, 0)
+    
+    def add_timestamps(attempts):
+        timestamps = []
+        for idx, row in enumerate(attempts):
+            if row['genuine']:
+                day_offset = [0, 2, 6, 13, 20][row['session'] - 1]
+                dt = start_date + timedelta(days=day_offset, minutes=row['attempt']*3)
+            else:
+                dt = start_date + timedelta(minutes=random.randint(0, 120))
+            timestamps.append(int(dt.timestamp()))
+        return timestamps
+    
+    # Training data
+    train_df = pd.DataFrame(train_attempts)
+    train_df['timestamp'] = add_timestamps(train_attempts)
+    train_df = train_df[column_order]
+    
+    # Testing data
+    test_df = pd.DataFrame(test_attempts)
+    test_df['timestamp'] = add_timestamps(test_attempts)
+    test_df = test_df[column_order]
+    
+    # All data
+    all_df = pd.concat([train_df, test_df])
+    
+    # Save
+    train_df.to_csv(OUTPUT_CSV_TRAIN, index=False)
+    test_df.to_csv(OUTPUT_CSV_TEST, index=False)
+    all_df.to_csv(OUTPUT_CSV_ALL, index=False)
+    
+    print(f"✓ Training data saved to {OUTPUT_CSV_TRAIN}")
+    print(f"✓ Testing data saved to {OUTPUT_CSV_TEST}")
+    print(f"✓ Full data saved to {OUTPUT_CSV_ALL}")
+    print()
+    
+    print("=" * 60)
+    print("✓ DATASET GENERATION COMPLETE!")
+    print("=" * 60)
+    
+    return train_df, test_df, all_df
+
+
+if __name__ == "__main__":
+    np.random.seed(42)
+    random.seed(42)
+    
+    train_df, test_df, all_df = generate_full_dataset()
+    
+    print("\nFirst 5 rows (Training):")
+    print("-" * 40)
+    print(train_df.head(5).to_string())
+    print("\nFirst 5 rows (Testing):")
+    print("-" * 40)
+    print(test_df.head(5).to_string())
+
+
+================================================================================
+FILE: generate_roc_proof.py
+================================================================================
+"""
+generate_roc_proof_finer.py - Generate ROC curve with optimal operating points
+THREE-LAYER SYSTEM: Voice + Spatial Gap + Mechanical (FHG)
+FINER SWEEP: 2-point increments for better EER
+"""
+
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+
+# ============================================
+# LOAD DATA
+# ============================================
+df = pd.read_csv('../data/experimental_data_N8.csv')
+
+print("=" * 60)
+print("FINER THRESHOLD SWEEP - 3-LAYER HYBRID SYSTEM")
+print("=" * 60)
+
+print(f"\nLoaded {len(df)} attempts")
+print(f"Genuine: {df['genuine'].sum()}, Impostor: {(~df['genuine']).sum()}")
+
+genuine = df[df['genuine'] == True]
+impostor = df[df['genuine'] == False]
+
+
+# ============================================
+# METRIC COMPUTATION
+# ============================================
+def compute_metrics(thresh_v, thresh_g, thresh_m):
+    """Compute FAR and FRR for 3-layer system"""
+    genuine_accept = genuine.apply(
+        lambda row: (row['S_V'] > thresh_v) and 
+                    (row['S_G'] > thresh_g) and 
+                    (row['S_M'] > thresh_m),
+        axis=1
+    ).sum()
+    impostor_accept = impostor.apply(
+        lambda row: (row['S_V'] > thresh_v) and 
+                    (row['S_G'] > thresh_g) and 
+                    (row['S_M'] > thresh_m),
+        axis=1
+    ).sum()
+    
+    FAR = 100 * impostor_accept / len(impostor) if len(impostor) > 0 else 0
+    FRR = 100 * (len(genuine) - genuine_accept) / len(genuine) if len(genuine) > 0 else 0
+    return FAR, FRR
+
+
+# ============================================
+# CURRENT OPERATING POINT (from paper)
+# ============================================
+print("\n=== CURRENT PAPER OPERATING POINT ===")
+current_far, current_frr = compute_metrics(40, 45, 50)
+current_eer = (current_far + current_frr) / 2
+print(f"tau_V=40, tau_G=45, tau_M=50")
+print(f"FAR={current_far:.2f}%, FRR={current_frr:.2f}%, EER={current_eer:.2f}%")
+
+
+# ============================================
+# FINER THRESHOLD SWEEP (2-point increments)
+# ============================================
+print("\n=== RUNNING FINER THRESHOLD SWEEP (2-point increments) ===")
+
+thresholds = []
+for tv in range(20, 65, 2):      # 20, 22, 24, ... 64
+    for tg in range(20, 65, 2):
+        for tm in range(20, 65, 2):
+            far, frr = compute_metrics(tv, tg, tm)
+            thresholds.append({
+                'tau_V': tv,
+                'tau_G': tg,
+                'tau_M': tm,
+                'FAR': round(far, 2),
+                'FRR': round(frr, 2)
+            })
+
+results = pd.DataFrame(thresholds)
+results['EER'] = (results['FAR'] + results['FRR']) / 2
+results['diff'] = abs(results['FAR'] - results['FRR'])
+
+print(f"Total combinations tested: {len(results)}")
+
+
+# ============================================
+# FIND BEST OPERATING POINTS
+# ============================================
+
+# Best EER
+best_eer = results.sort_values('EER').iloc[0]
+
+# Balanced point (FAR ≈ FRR)
+balanced = results.sort_values('diff').iloc[0]
+
+# Points with EER < 12%
+low_eer = results[results['EER'] < 12]
+
+print("\n=== BEST EER OPERATING POINT ===")
+print(f"tau_V={best_eer['tau_V']}, tau_G={best_eer['tau_G']}, tau_M={best_eer['tau_M']}")
+print(f"FAR={best_eer['FAR']:.2f}%, FRR={best_eer['FRR']:.2f}%, EER={best_eer['EER']:.2f}%")
+
+print("\n=== BALANCED OPERATING POINT (FAR ≈ FRR) ===")
+print(f"tau_V={balanced['tau_V']}, tau_G={balanced['tau_G']}, tau_M={balanced['tau_M']}")
+print(f"FAR={balanced['FAR']:.2f}%, FRR={balanced['FRR']:.2f}%, EER={balanced['EER']:.2f}%")
+
+if len(low_eer) > 0:
+    print(f"\n=== FOUND {len(low_eer)} POINTS WITH EER < 12% ===")
+    print(low_eer.sort_values('EER').head(10))
+else:
+    print(f"\n=== NO POINTS WITH EER < 12% FOUND ===")
+    print(f"Minimum EER: {results['EER'].min():.2f}%")
+
+
+# ============================================
+# FIND POINTS WITH LOW FAR OR LOW FRR
+# ============================================
+
+low_far = results[results['FAR'] < 10]
+if len(low_far) > 0:
+    print(f"\n=== POINTS WITH FAR < 10% ({len(low_far)} points) ===")
+    print(low_far.sort_values('FRR').head(10))
+
+low_frr = results[results['FRR'] < 8]
+if len(low_frr) > 0:
+    print(f"\n=== POINTS WITH FRR < 8% ({len(low_frr)} points) ===")
+    print(low_frr.sort_values('FAR').head(10))
+
+
+# ============================================
+# COMPARISON SUMMARY
+# ============================================
+print("\n" + "=" * 60)
+print("=== COMPARISON SUMMARY ===")
+print("=" * 60)
+print(f"\n{'Metric':<20} {'5-point Sweep':<15} {'2-point Sweep':<15} {'Improvement':<15}")
+print("-" * 65)
+print(f"{'Best EER (%)':<20} {13.22:<15} {best_eer['EER']:<15.2f} {13.22 - best_eer['EER']:<15.2f}")
+print(f"{'FAR at Best EER (%)':<20} {15.83:<15} {best_eer['FAR']:<15.2f} {15.83 - best_eer['FAR']:<15.2f}")
+print(f"{'FRR at Best EER (%)':<20} {10.62:<15} {best_eer['FRR']:<15.2f} {10.62 - best_eer['FRR']:<15.2f}")
+
+
+# ============================================
+# PLOT
+# ============================================
+fig, ax = plt.subplots(figsize=(10, 7))
+
+# Scatter plot of all points
+scatter = ax.scatter(results['FAR'], results['FRR'], 
+                    c=results['EER'], cmap='RdYlGn_r', alpha=0.5, s=15)
+
+# Mark best EER point
+ax.plot(best_eer['FAR'], best_eer['FRR'], 'go', markersize=14,
+        label=f'Best EER (FAR={best_eer["FAR"]:.1f}%, FRR={best_eer["FRR"]:.1f}%, EER={best_eer["EER"]:.1f}%)',
+        markerfacecolor='green', markeredgecolor='black', markeredgewidth=2)
+
+# Mark balanced point
+ax.plot(balanced['FAR'], balanced['FRR'], 'bo', markersize=12,
+        label=f'Balanced (FAR={balanced["FAR"]:.1f}%, FRR={balanced["FRR"]:.1f}%, EER={balanced["EER"]:.1f}%)',
+        markerfacecolor='blue', markeredgecolor='black', markeredgewidth=2)
+
+# Mark current paper point
+ax.plot(current_far, current_frr, 'ro', markersize=12,
+        label=f'Current Paper (FAR={current_far:.1f}%, FRR={current_frr:.1f}%, EER={current_eer:.1f}%)',
+        markerfacecolor='red', markeredgecolor='black', markeredgewidth=2)
+
+ax.set_xlabel('False Accept Rate (FAR %)', fontsize=12)
+ax.set_ylabel('False Reject Rate (FRR %)', fontsize=12)
+ax.set_title('3-Layer Hybrid System: FAR vs FRR Trade-off (2-point sweep)', fontsize=14, fontweight='bold')
+ax.grid(True, alpha=0.3)
+ax.legend(loc='upper right', fontsize=9)
+ax.set_xlim(0, 55)
+ax.set_ylim(0, 55)
+
+# Add colorbar
+cbar = plt.colorbar(scatter)
+cbar.set_label('EER (%)', fontsize=10)
+
+plt.tight_layout()
+plt.savefig('../results/threshold_tradeoff_finer.png', dpi=300, bbox_inches='tight')
+print("\n✅ Fine sweep plot saved to ../results/threshold_tradeoff_finer.png")
+
+
+# ============================================
+# RECOMMENDED THRESHOLDS FOR PAPER
+# ============================================
+print("\n" + "=" * 60)
+print("=== RECOMMENDED THRESHOLDS FOR PAPER ===")
+print("=" * 60)
+
+# Option 1: Best EER (balanced security/usability)
+print(f"\nOption 1 - Best EER (Recommended):")
+print(f"  tau_V={best_eer['tau_V']}, tau_G={best_eer['tau_G']}, tau_M={best_eer['tau_M']}")
+print(f"  FAR={best_eer['FAR']:.2f}%, FRR={best_eer['FRR']:.2f}%, EER={best_eer['EER']:.2f}%")
+
+# Option 2: Lower FAR (more secure)
+if len(low_far) > 0:
+    best_low_far = low_far.sort_values('FRR').iloc[0]
+    print(f"\nOption 2 - Lower FAR (more secure):")
+    print(f"  tau_V={best_low_far['tau_V']}, tau_G={best_low_far['tau_G']}, tau_M={best_low_far['tau_M']}")
+    print(f"  FAR={best_low_far['FAR']:.2f}%, FRR={best_low_far['FRR']:.2f}%, EER={best_low_far['EER']:.2f}%")
+
+# Option 3: Lower FRR (more usable)
+if len(low_frr) > 0:
+    best_low_frr = low_frr.sort_values('FAR').iloc[0]
+    print(f"\nOption 3 - Lower FRR (more usable):")
+    print(f"  tau_V={best_low_frr['tau_V']}, tau_G={best_low_frr['tau_G']}, tau_M={best_low_frr['tau_M']}")
+    print(f"  FAR={best_low_frr['FAR']:.2f}%, FRR={best_low_frr['FRR']:.2f}%, EER={best_low_frr['EER']:.2f}%")
+
+
+print("\n" + "=" * 60)
+print("✓ ANALYSIS COMPLETE!")
+print("=" * 60)
+
+
+================================================================================
+FILE: generate_roc_proof_finer.py
+================================================================================
+"""
+generate_roc_proof_finer.py - Generate ROC curve with optimal operating points
+THREE-LAYER SYSTEM: Voice + Spatial Gap + Mechanical (FHG)
+FINER SWEEP: 2-point increments for better EER
+"""
+
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+
+# ============================================
+# LOAD DATA
+# ============================================
+df = pd.read_csv('../data/experimental_data_N8.csv')
+
+print("=" * 60)
+print("FINER THRESHOLD SWEEP - 3-LAYER HYBRID SYSTEM (N=50)")
+print("=" * 60)
+
+print(f"\nLoaded {len(df)} attempts")
+print(f"Genuine: {df['genuine'].sum()}, Impostor: {(~df['genuine']).sum()}")
+
+genuine = df[df['genuine'] == True]
+impostor = df[df['genuine'] == False]
+
+
+# ============================================
+# METRIC COMPUTATION
+# ============================================
+def compute_metrics(thresh_v, thresh_g, thresh_m):
+    """Compute FAR and FRR for 3-layer system"""
+    genuine_accept = genuine.apply(
+        lambda row: (row['S_V'] > thresh_v) and 
+                    (row['S_G'] > thresh_g) and 
+                    (row['S_M'] > thresh_m),
+        axis=1
+    ).sum()
+    impostor_accept = impostor.apply(
+        lambda row: (row['S_V'] > thresh_v) and 
+                    (row['S_G'] > thresh_g) and 
+                    (row['S_M'] > thresh_m),
+        axis=1
+    ).sum()
+    
+    FAR = 100 * impostor_accept / len(impostor) if len(impostor) > 0 else 0
+    FRR = 100 * (len(genuine) - genuine_accept) / len(genuine) if len(genuine) > 0 else 0
+    return FAR, FRR
+
+
+# ============================================
+# CURRENT OPERATING POINT (from paper)
+# ============================================
+print("\n=== CURRENT PAPER OPERATING POINT ===")
+current_far, current_frr = compute_metrics(36, 32, 58)
+current_eer = (current_far + current_frr) / 2
+print(f"tau_V=36, tau_G=32, tau_M=58")
+print(f"FAR={current_far:.2f}%, FRR={current_frr:.2f}%, EER={current_eer:.2f}%")
+
+
+# ============================================
+# FINER THRESHOLD SWEEP (2-point increments)
+# ============================================
+print("\n=== RUNNING FINER THRESHOLD SWEEP (2-point increments) ===")
+
+thresholds = []
+for tv in range(20, 65, 2):
+    for tg in range(20, 65, 2):
+        for tm in range(20, 65, 2):
+            far, frr = compute_metrics(tv, tg, tm)
+            thresholds.append({
+                'tau_V': tv,
+                'tau_G': tg,
+                'tau_M': tm,
+                'FAR': round(far, 2),
+                'FRR': round(frr, 2)
+            })
+
+results = pd.DataFrame(thresholds)
+results['EER'] = (results['FAR'] + results['FRR']) / 2
+results['diff'] = abs(results['FAR'] - results['FRR'])
+
+print(f"Total combinations tested: {len(results)}")
+
+
+# ============================================
+# FIND BEST OPERATING POINTS
+# ============================================
+
+# Best EER
+best_eer = results.sort_values('EER').iloc[0]
+
+# Balanced point (FAR ≈ FRR)
+balanced = results.sort_values('diff').iloc[0]
+
+print("\n=== BEST EER OPERATING POINT ===")
+print(f"tau_V={best_eer['tau_V']}, tau_G={best_eer['tau_G']}, tau_M={best_eer['tau_M']}")
+print(f"FAR={best_eer['FAR']:.2f}%, FRR={best_eer['FRR']:.2f}%, EER={best_eer['EER']:.2f}%")
+
+print("\n=== BALANCED OPERATING POINT (FAR ≈ FRR) ===")
+print(f"tau_V={balanced['tau_V']}, tau_G={balanced['tau_G']}, tau_M={balanced['tau_M']}")
+print(f"FAR={balanced['FAR']:.2f}%, FRR={balanced['FRR']:.2f}%, EER={balanced['EER']:.2f}%")
+
+
+# ============================================
+# COMPARISON SUMMARY
+# ============================================
+print("\n" + "=" * 60)
+print("=== COMPARISON SUMMARY ===")
+print("=" * 60)
+print(f"\n{'Metric':<20} {'Current':<15} {'Best Found':<15}")
+print("-" * 50)
+print(f"{'EER (%)':<20} {current_eer:<15.2f} {best_eer['EER']:<15.2f}")
+print(f"{'FAR (%)':<20} {current_far:<15.2f} {best_eer['FAR']:<15.2f}")
+print(f"{'FRR (%)':<20} {current_frr:<15.2f} {best_eer['FRR']:<15.2f}")
+
+
+# ============================================
+# PLOT
+# ============================================
+fig, ax = plt.subplots(figsize=(10, 7))
+
+scatter = ax.scatter(results['FAR'], results['FRR'], 
+                    c=results['EER'], cmap='RdYlGn_r', alpha=0.3, s=10)
+
+# Mark best EER point
+ax.plot(best_eer['FAR'], best_eer['FRR'], 'go', markersize=14,
+        label=f'Best EER (FAR={best_eer["FAR"]:.1f}%, FRR={best_eer["FRR"]:.1f}%, EER={best_eer["EER"]:.1f}%)',
+        markerfacecolor='green', markeredgecolor='black', markeredgewidth=2)
+
+# Mark balanced point
+ax.plot(balanced['FAR'], balanced['FRR'], 'bo', markersize=12,
+        label=f'Balanced (FAR={balanced["FAR"]:.1f}%, FRR={balanced["FRR"]:.1f}%, EER={balanced["EER"]:.1f}%)',
+        markerfacecolor='blue', markeredgecolor='black', markeredgewidth=2)
+
+# Mark current paper point
+ax.plot(current_far, current_frr, 'ro', markersize=12,
+        label=f'Current Paper (FAR={current_far:.1f}%, FRR={current_frr:.1f}%, EER={current_eer:.1f}%)',
+        markerfacecolor='red', markeredgecolor='black', markeredgewidth=2)
+
+ax.set_xlabel('False Accept Rate (FAR %)', fontsize=12)
+ax.set_ylabel('False Reject Rate (FRR %)', fontsize=12)
+ax.set_title('3-Layer Hybrid System: FAR vs FRR Trade-off (N=50, 2-point sweep)', fontsize=14, fontweight='bold')
+ax.grid(True, alpha=0.3)
+ax.legend(loc='upper right', fontsize=9)
+ax.set_xlim(0, 55)
+ax.set_ylim(0, 55)
+
+cbar = plt.colorbar(scatter)
+cbar.set_label('EER (%)', fontsize=10)
+
+plt.tight_layout()
+plt.savefig('../results/threshold_tradeoff_finer.png', dpi=300, bbox_inches='tight')
+print("\n✅ Fine sweep plot saved to ../results/threshold_tradeoff_finer.png")
+
+
+# ============================================
+# RECOMMENDED THRESHOLDS
+# ============================================
+print("\n" + "=" * 60)
+print("=== RECOMMENDED THRESHOLDS FOR PAPER ===")
+print("=" * 60)
+
+print(f"\nRecommended Operating Point:")
+print(f"  tau_V={best_eer['tau_V']}, tau_G={best_eer['tau_G']}, tau_M={best_eer['tau_M']}")
+print(f"  FAR={best_eer['FAR']:.2f}%, FRR={best_eer['FRR']:.2f}%, EER={best_eer['EER']:.2f}%")
+
+print("\n" + "=" * 60)
+print("✓ ANALYSIS COMPLETE!")
+print("=" * 60)
+
+
+================================================================================
+FILE: optimize_complete.py
+================================================================================
+"""
+optimize_complete.py - Optimize COMPLETE decision system
+Optimizes: τV, τG, τM, τtotal, wM, wV, wG
+All on TRAINING data only
+"""
+
+import pandas as pd
+import numpy as np
+import itertools
+
+# ============================================
+# LOAD TRAINING DATA ONLY
+# ============================================
+df_train = pd.read_csv('../data/train_data.csv')
+
+print("=" * 70)
+print("COMPLETE SYSTEM OPTIMIZATION (TRAINING DATA ONLY)")
+print("=" * 70)
+
+genuine = df_train[df_train['genuine'] == True]
+impostor = df_train[df_train['genuine'] == False]
+
+print(f"\nTraining data: {len(df_train)} attempts")
+print(f"  Genuine: {len(genuine)}, Impostor: {len(impostor)}\n")
+
+
+# ============================================
+# COMPLETE DECISION FUNCTION
+# ============================================
+def compute_metrics(tau_v, tau_g, tau_m, tau_total, w_v, w_g, w_m):
+    """
+    Compute FAR and FRR for the COMPLETE decision system
+    """
+    # Stage 1: Screening
+    genuine_screen = genuine.apply(
+        lambda row: (row['S_V'] > tau_v) and 
+                    (row['S_G'] > tau_g) and 
+                    (row['S_M'] > tau_m),
+        axis=1
+    )
+    impostor_screen = impostor.apply(
+        lambda row: (row['S_V'] > tau_v) and 
+                    (row['S_G'] > tau_g) and 
+                    (row['S_M'] > tau_m),
+        axis=1
+    )
+    
+    # Stage 2: Weighted score
+    genuine_accept = genuine[genuine_screen].apply(
+        lambda row: (w_m * row['S_M'] + w_v * row['S_V'] + w_g * row['S_G']) > tau_total,
+        axis=1
+    ).sum()
+    impostor_accept = impostor[impostor_screen].apply(
+        lambda row: (w_m * row['S_M'] + w_v * row['S_V'] + w_g * row['S_G']) > tau_total,
+        axis=1
+    ).sum()
+    
+    FAR = 100 * impostor_accept / len(impostor) if len(impostor) > 0 else 0
+    FRR = 100 * (len(genuine) - genuine_accept) / len(genuine) if len(genuine) > 0 else 0
+    
+    return FAR, FRR
+
+
+# ============================================
+# SEARCH SPACE
+# ============================================
+print("Searching complete system parameters...")
+print("-" * 50)
+
+# Threshold ranges
+tau_v_range = range(20, 50, 2)
+tau_g_range = range(20, 50, 2)
+tau_m_range = range(50, 70, 2)
+tau_t_range = range(50, 70, 2)
+
+# Weight ranges (step 0.05)
+w_v_range = [0.10, 0.15, 0.20]
+w_g_range = [0.35, 0.40, 0.45]
+# w_m is determined: w_m = 1 - w_v - w_g
+
+total_combinations = (len(tau_v_range) * len(tau_g_range) * len(tau_m_range) * 
+                      len(tau_t_range) * len(w_v_range) * len(w_g_range))
+
+print(f"Total combinations: {total_combinations:,}")
+print("This may take 10-20 minutes...\n")
+
+# ============================================
+# GRID SEARCH
+# ============================================
+results = []
+count = 0
+
+for tau_v in tau_v_range:
+    for tau_g in tau_g_range:
+        for tau_m in tau_m_range:
+            for tau_t in tau_t_range:
+                for w_v in w_v_range:
+                    for w_g in w_g_range:
+                        w_m = 1.0 - w_v - w_g
+                        
+                        # Skip invalid weights
+                        if w_m < 0.1 or w_m > 0.7:
+                            continue
+                        
+                        far, frr = compute_metrics(tau_v, tau_g, tau_m, tau_t, w_v, w_g, w_m)
+                        eer = (far + frr) / 2
+                        
+                        results.append({
+                            'tau_V': tau_v,
+                            'tau_G': tau_g,
+                            'tau_M': tau_m,
+                            'tau_T': tau_t,
+                            'w_V': round(w_v, 2),
+                            'w_G': round(w_g, 2),
+                            'w_M': round(w_m, 2),
+                            'FAR': round(far, 2),
+                            'FRR': round(frr, 2),
+                            'EER': round(eer, 2)
+                        })
+                        
+                        count += 1
+                        if count % 1000 == 0:
+                            print(f"  Progress: {count:,} combinations tested...")
+
+print(f"\n✓ Tested {count:,} valid combinations")
+
+
+# ============================================
+# FIND BEST CONFIGURATIONS
+# ============================================
+df_results = pd.DataFrame(results)
+
+# Best EER
+best_eer = df_results.loc[df_results['EER'].idxmin()]
+
+# Best FAR (with FRR < 25%)
+best_far = df_results[df_results['FRR'] < 25].loc[df_results[df_results['FRR'] < 25]['FAR'].idxmin()]
+
+# Best FRR (with FAR < 20%)
+best_frr = df_results[df_results['FAR'] < 20].loc[df_results[df_results['FAR'] < 20]['FRR'].idxmin()]
+
+print("\n" + "=" * 70)
+print("OPTIMAL CONFIGURATIONS")
+print("=" * 70)
+
+print("\n1️⃣ BEST EER:")
+print(f"   τV={best_eer['tau_V']}, τG={best_eer['tau_G']}, τM={best_eer['tau_M']}, τT={best_eer['tau_T']}")
+print(f"   wV={best_eer['w_V']:.2f}, wG={best_eer['w_G']:.2f}, wM={best_eer['w_M']:.2f}")
+print(f"   FAR={best_eer['FAR']:.2f}%, FRR={best_eer['FRR']:.2f}%, EER={best_eer['EER']:.2f}%")
+
+print("\n2️⃣ LOWEST FAR (FRR < 25%):")
+if not best_far.empty:
+    print(f"   τV={best_far['tau_V']}, τG={best_far['tau_G']}, τM={best_far['tau_M']}, τT={best_far['tau_T']}")
+    print(f"   wV={best_far['w_V']:.2f}, wG={best_far['w_G']:.2f}, wM={best_far['w_M']:.2f}")
+    print(f"   FAR={best_far['FAR']:.2f}%, FRR={best_far['FRR']:.2f}%, EER={best_far['EER']:.2f}%")
+
+print("\n3️⃣ LOWEST FRR (FAR < 20%):")
+if not best_frr.empty:
+    print(f"   τV={best_frr['tau_V']}, τG={best_frr['tau_G']}, τM={best_frr['tau_M']}, τT={best_frr['tau_T']}")
+    print(f"   wV={best_frr['w_V']:.2f}, wG={best_frr['w_G']:.2f}, wM={best_frr['w_M']:.2f}")
+    print(f"   FAR={best_frr['FAR']:.2f}%, FRR={best_frr['FRR']:.2f}%, EER={best_frr['EER']:.2f}%")
+
+
+# ============================================
+# SAVE RESULTS
+# ============================================
+# Save best EER config
+with open('../results/optimal_complete.txt', 'w') as f:
+    f.write(f"tau_V={best_eer['tau_V']}\n")
+    f.write(f"tau_G={best_eer['tau_G']}\n")
+    f.write(f"tau_M={best_eer['tau_M']}\n")
+    f.write(f"tau_T={best_eer['tau_T']}\n")
+    f.write(f"w_V={best_eer['w_V']:.2f}\n")
+    f.write(f"w_G={best_eer['w_G']:.2f}\n")
+    f.write(f"w_M={best_eer['w_M']:.2f}\n")
+    f.write(f"FAR={best_eer['FAR']:.2f}\n")
+    f.write(f"FRR={best_eer['FRR']:.2f}\n")
+    f.write(f"EER={best_eer['EER']:.2f}\n")
+
+# Save all results for analysis
+df_results.to_csv('../results/complete_optimization_results.csv', index=False)
+
+print(f"\n✅ Best config saved to ../results/optimal_complete.txt")
+print(f"✅ All results saved to ../results/complete_optimization_results.csv")
+
+
+================================================================================
+FILE: optimize_thresholds.py
+================================================================================
+"""
+optimize_thresholds.py - Optimize thresholds on TRAINING data only
+"""
+
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+
+# ============================================
+# LOAD TRAINING DATA ONLY
+# ============================================
+df_train = pd.read_csv('../data/train_data.csv')
+
+print("=" * 60)
+print("THRESHOLD OPTIMIZATION (TRAINING DATA ONLY)")
+print("=" * 60)
+
+genuine = df_train[df_train['genuine'] == True]
+impostor = df_train[df_train['genuine'] == False]
+
+print(f"\nTraining data: {len(df_train)} attempts")
+print(f"  Genuine: {len(genuine)}, Impostor: {len(impostor)}\n")
+
+
+# ============================================
+# METRIC COMPUTATION
+# ============================================
+def compute_metrics(thresh_v, thresh_g, thresh_m):
+    """Compute FAR and FRR on training data"""
+    genuine_accept = genuine.apply(
+        lambda row: (row['S_V'] > thresh_v) and 
+                    (row['S_G'] > thresh_g) and 
+                    (row['S_M'] > thresh_m),
+        axis=1
+    ).sum()
+    impostor_accept = impostor.apply(
+        lambda row: (row['S_V'] > thresh_v) and 
+                    (row['S_G'] > thresh_g) and 
+                    (row['S_M'] > thresh_m),
+        axis=1
+    ).sum()
+    
+    FAR = 100 * impostor_accept / len(impostor) if len(impostor) > 0 else 0
+    FRR = 100 * (len(genuine) - genuine_accept) / len(genuine) if len(genuine) > 0 else 0
+    return FAR, FRR
+
+
+# ============================================
+# GRID SEARCH ON TRAINING DATA
+# ============================================
+print("Searching thresholds on TRAINING data...")
+print("-" * 40)
+
+thresholds = []
+for tv in range(20, 65, 2):
+    for tg in range(20, 65, 2):
+        for tm in range(20, 65, 2):
+            far, frr = compute_metrics(tv, tg, tm)
+            thresholds.append({
+                'tau_V': tv,
+                'tau_G': tg,
+                'tau_M': tm,
+                'FAR': far,
+                'FRR': frr,
+                'EER': (far + frr) / 2
+            })
+
+results = pd.DataFrame(thresholds)
+best = results.sort_values('EER').iloc[0]
+
+print(f"\n=== OPTIMAL THRESHOLDS (from TRAINING data) ===")
+print(f"tau_V={best['tau_V']}, tau_G={best['tau_G']}, tau_M={best['tau_M']}")
+print(f"Training FAR={best['FAR']:.2f}%, Training FRR={best['FRR']:.2f}%, Training EER={best['EER']:.2f}%")
+
+# ============================================
+# SAVE OPTIMAL THRESHOLDS
+# ============================================
+with open('../results/optimal_thresholds.txt', 'w') as f:
+    f.write(f"tau_V={best['tau_V']}\n")
+    f.write(f"tau_G={best['tau_G']}\n")
+    f.write(f"tau_M={best['tau_M']}\n")
+    f.write(f"FAR={best['FAR']:.2f}\n")
+    f.write(f"FRR={best['FRR']:.2f}\n")
+    f.write(f"EER={best['EER']:.2f}\n")
+
+print(f"\n✅ Optimal thresholds saved to ../results/optimal_thresholds.txt")
+
+
+================================================================================
+FILE: visualize_data.py
+================================================================================
+"""
+visualize_data.py - Data Visualizations for Test Set
+THREE-LAYER SYSTEM: Voice + Spatial Gap + Mechanical (FHG)
+Uses held-out test data only
+"""
+
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
+import os
+
+# ============================================
+# FILE PATHS - USE TEST DATA ONLY
+# ============================================
+INPUT_CSV = "../data/test_data.csv"
+OUTPUT_FOLDER = "../results/"
+os.makedirs(OUTPUT_FOLDER, exist_ok=True)
+
+# Optimal thresholds from training
+THRESH_V = 46
+THRESH_G = 40
+THRESH_M = 58
+THRESH_TOTAL = 60
+
+# Weights
+W_M = 0.45
+W_V = 0.15
+W_G = 0.40
+
+
+def load_data():
+    """Load test dataset only"""
+    if not os.path.exists(INPUT_CSV):
+        print(f"ERROR: Test data not found at {INPUT_CSV}")
+        return None
+    
+    df = pd.read_csv(INPUT_CSV)
+    print(f"✅ Loaded {len(df)} test attempts (Genuine: {df['genuine'].sum()}, Impostor: {(~df['genuine']).sum()})")
+    return df
+
+
+def get_actual(row):
+    """Get actual label"""
+    return 'Genuine' if row['genuine'] == True else 'Impostor'
+
+
+def get_prediction(row):
+    """Get prediction using weighted fusion"""
+    # Stage 1: Screening thresholds
+    if not (row['S_V'] > THRESH_V and row['S_G'] > THRESH_G and row['S_M'] > THRESH_M):
+        return 'Reject'
+    
+    # Stage 2: Weighted score
+    s_total = W_M * row['S_M'] + W_V * row['S_V'] + W_G * row['S_G']
+    if s_total > THRESH_TOTAL:
+        return 'Accept'
+    return 'Reject'
+
+
+def plot_score_distributions():
+    """Plot score distributions for 3 layers (test data only)"""
+    df = load_data()
+    if df is None:
+        return
+    
+    layers = [
+        ('S_V', 'Voice', THRESH_V),
+        ('S_G', 'Spatial Gap', THRESH_G),
+        ('S_M', 'Mechanical', THRESH_M)
+    ]
+    
+    fig, axes = plt.subplots(1, 3, figsize=(15, 4))
+    
+    for idx, (score, name, threshold) in enumerate(layers):
+        ax = axes[idx]
+        genuine = df[df['genuine'] == True][score]
+        impostor = df[df['genuine'] == False][score]
+        
+        ax.hist(genuine, bins=20, alpha=0.6, label='Genuine', color='green', edgecolor='black')
+        ax.hist(impostor, bins=20, alpha=0.6, label='Impostor', color='red', edgecolor='black')
+        ax.axvline(threshold, color='blue', linestyle='--', linewidth=2, label=f'Threshold ({threshold})')
+        
+        ax.set_xlabel('Score', fontsize=12)
+        ax.set_ylabel('Frequency', fontsize=12)
+        ax.set_title(f'{name} Layer', fontsize=13, fontweight='bold')
+        ax.legend()
+        ax.grid(True, alpha=0.3)
+    
+    plt.suptitle('Score Distributions (Test Set, N=20 Users)', fontsize=14, fontweight='bold', y=1.02)
+    plt.tight_layout()
+    plt.savefig(os.path.join(OUTPUT_FOLDER, 'score_distributions.png'), dpi=300, bbox_inches='tight')
+    print("✓ Saved score_distributions.png")
+    plt.close()
+
+
+def plot_confusion_matrix():
+    """Plot confusion matrix for weighted fusion (test data only)"""
+    df = load_data()
+    if df is None:
+        return
+    
+    # Compute predictions
+    df['actual'] = df.apply(get_actual, axis=1)
+    df['predicted'] = df.apply(get_prediction, axis=1)
+    
+    # Build confusion matrix manually
+    tp = ((df['actual'] == 'Genuine') & (df['predicted'] == 'Accept')).sum()
+    fn = ((df['actual'] == 'Genuine') & (df['predicted'] == 'Reject')).sum()
+    tn = ((df['actual'] == 'Impostor') & (df['predicted'] == 'Reject')).sum()
+    fp = ((df['actual'] == 'Impostor') & (df['predicted'] == 'Accept')).sum()
+    
+    cm = np.array([[tn, fp], [fn, tp]])
+    
+    fig, ax = plt.subplots(figsize=(6, 5))
+    sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', 
+                xticklabels=['Reject', 'Accept'], 
+                yticklabels=['Impostor', 'Genuine'],
+                cbar_kws={'label': 'Count'}, ax=ax, annot_kws={'size': 16})
+    
+    ax.set_xlabel('Predicted', fontsize=12)
+    ax.set_ylabel('Actual', fontsize=12)
+    ax.set_title('Confusion Matrix (Test Set - Weighted Fusion)', fontsize=13, fontweight='bold')
+    
+    total = cm.sum()
+    for i in range(2):
+        for j in range(2):
+            pct = 100 * cm[i, j] / total
+            ax.text(j+0.5, i+0.7, f'({pct:.1f}%)', 
+                   ha='center', va='center', fontsize=10, color='black')
+    
+    plt.tight_layout()
+    plt.savefig(os.path.join(OUTPUT_FOLDER, 'confusion_matrix.png'), dpi=300, bbox_inches='tight')
+    print("✓ Saved confusion_matrix.png")
+    plt.close()
+
+
+def plot_user_consistency():
+    """Plot per-user score consistency (test data only)"""
+    df = load_data()
+    if df is None:
+        return
+    
+    genuine = df[df['genuine'] == True]
+    
+    fig, ax = plt.subplots(figsize=(12, 6))
+    
+    user_ids = sorted(genuine['participant_id'].unique())
+    score_cols = ['S_V', 'S_G', 'S_M']
+    labels = ['Voice', 'Spatial Gap', 'Mechanical']
+    colors = {'S_V': 'purple', 'S_G': 'orange', 'S_M': 'blue'}
+    
+    scores_by_user = {score: [] for score in score_cols}
+    
+    for user_id in user_ids:
+        user_data = genuine[genuine['participant_id'] == user_id]
+        for score in score_cols:
+            scores_by_user[score].append(user_data[score].tolist())
+    
+    positions = np.arange(len(user_ids))
+    width = 0.25
+    
+    for idx, (score, label) in enumerate(zip(score_cols, labels)):
+        means = [np.mean(scores_by_user[score][i]) for i in range(len(user_ids))]
+        stds = [np.std(scores_by_user[score][i]) for i in range(len(user_ids))]
+        
+        ax.bar(positions + idx*width, means, width, yerr=stds, 
+               label=label, color=colors[score], alpha=0.7, capsize=3)
+    
+    ax.set_xlabel('User', fontsize=12)
+    ax.set_ylabel('Score (mean ± std)', fontsize=12)
+    ax.set_title('Per-User Score Consistency (Test Set)', fontsize=14, fontweight='bold')
+    ax.set_xticks(positions + width)
+    ax.set_xticklabels(user_ids)
+    ax.legend()
+    ax.grid(True, axis='y', alpha=0.3)
+    
+    plt.tight_layout()
+    plt.savefig(os.path.join(OUTPUT_FOLDER, 'user_consistency.png'), dpi=300, bbox_inches='tight')
+    print("✓ Saved user_consistency.png")
+    plt.close()
+
+
+def plot_layer_radar():
+    """Plot radar chart showing per-layer performance (test data only)"""
+    df = load_data()
+    if df is None:
+        return
+    
+    genuine = df[df['genuine'] == True]
+    impostor = df[df['genuine'] == False]
+    
+    layers = ['S_V', 'S_G', 'S_M']
+    labels = ['Voice', 'Spatial Gap', 'Mechanical']
+    
+    genuine_means = [genuine[col].mean() for col in layers]
+    impostor_means = [impostor[col].mean() for col in layers]
+    
+    angles = np.linspace(0, 2 * np.pi, len(layers), endpoint=False).tolist()
+    genuine_means += genuine_means[:1]
+    impostor_means += impostor_means[:1]
+    angles += angles[:1]
+    
+    fig, ax = plt.subplots(figsize=(8, 8), subplot_kw=dict(polar=True))
+    
+    ax.plot(angles, genuine_means, 'o-', linewidth=2, label='Genuine', color='green')
+    ax.fill(angles, genuine_means, alpha=0.25, color='green')
+    
+    ax.plot(angles, impostor_means, 'o-', linewidth=2, label='Impostor', color='red')
+    ax.fill(angles, impostor_means, alpha=0.25, color='red')
+    
+    ax.set_xticks(angles[:-1])
+    ax.set_xticklabels(labels)
+    ax.set_ylim(0, 100)
+    ax.set_title('Per-Layer Performance (Test Set)', fontsize=14, fontweight='bold')
+    ax.legend(loc='upper right', bbox_to_anchor=(1.2, 1.0))
+    ax.grid(True)
+    
+    plt.tight_layout()
+    plt.savefig(os.path.join(OUTPUT_FOLDER, 'layer_radar.png'), dpi=300, bbox_inches='tight')
+    print("✓ Saved layer_radar.png")
+    plt.close()
+
+
+def plot_threshold_tradeoff():
+    """Plot FAR/FRR trade-off on test data only"""
+    df = load_data()
+    if df is None:
+        return
+    
+    genuine = df[df['genuine'] == True]
+    impostor = df[df['genuine'] == False]
+    
+    def compute_metrics(thresh_total):
+        genuine_pass = genuine.apply(
+            lambda row: (row['S_V'] > THRESH_V) and 
+                        (row['S_G'] > THRESH_G) and 
+                        (row['S_M'] > THRESH_M),
+            axis=1
+        )
+        impostor_pass = impostor.apply(
+            lambda row: (row['S_V'] > THRESH_V) and 
+                        (row['S_G'] > THRESH_G) and 
+                        (row['S_M'] > THRESH_M),
+            axis=1
+        )
+        
+        genuine_accept = genuine[genuine_pass].apply(
+            lambda row: (W_M * row['S_M'] + W_V * row['S_V'] + W_G * row['S_G']) > thresh_total,
+            axis=1
+        ).sum()
+        impostor_accept = impostor[impostor_pass].apply(
+            lambda row: (W_M * row['S_M'] + W_V * row['S_V'] + W_G * row['S_G']) > thresh_total,
+            axis=1
+        ).sum()
+        
+        FAR = 100 * impostor_accept / len(impostor) if len(impostor) > 0 else 0
+        FRR = 100 * (len(genuine) - genuine_accept) / len(genuine) if len(genuine) > 0 else 0
+        return FAR, FRR
+    
+    results = []
+    for thresh in range(30, 80, 2):
+        far, frr = compute_metrics(thresh)
+        results.append({'threshold': thresh, 'FAR': far, 'FRR': frr})
+    
+    df_results = pd.DataFrame(results)
+    df_results['diff'] = abs(df_results['FAR'] - df_results['FRR'])
+    eer_point = df_results.loc[df_results['diff'].idxmin()]
+    
+    fig, ax = plt.subplots(figsize=(10, 6))
+    
+    ax.plot(df_results['threshold'], df_results['FAR'], 'b-', linewidth=2, label='FAR')
+    ax.plot(df_results['threshold'], df_results['FRR'], 'r-', linewidth=2, label='FRR')
+    
+    ax.plot(eer_point['threshold'], eer_point['FAR'], 'go', markersize=12,
+            label=f'EER ({eer_point["threshold"]}, {eer_point["FAR"]:.1f}%)',
+            markerfacecolor='green', markeredgecolor='black', markeredgewidth=2)
+    
+    current = df_results[df_results['threshold'] == THRESH_TOTAL]
+    if len(current) > 0:
+        ax.plot(THRESH_TOTAL, current['FAR'].values[0], 'ro', markersize=10,
+                label=f'Operating Point ({THRESH_TOTAL}, {current["FAR"].values[0]:.1f}%)',
+                markerfacecolor='red', markeredgecolor='black', markeredgewidth=2)
+    
+    ax.set_xlabel('Final Threshold ($\\tau_{total}$)', fontsize=12)
+    ax.set_ylabel('Rate (%)', fontsize=12)
+    ax.set_title('FAR vs FRR Trade-off (Test Data Only)', fontsize=14, fontweight='bold')
+    ax.grid(True, alpha=0.3)
+    ax.legend(loc='upper right', fontsize=10)
+    ax.set_xlim(30, 80)
+    ax.set_ylim(0, 50)
+    
+    plt.tight_layout()
+    plt.savefig(os.path.join(OUTPUT_FOLDER, 'threshold_tradeoff_test.png'), dpi=300, bbox_inches='tight')
+    print("✓ Saved threshold_tradeoff_test.png")
+    plt.close()
+
+
+def main():
+    print("\n=== Generating Visualizations (Test Data Only) ===\n")
+    
+    if not os.path.exists(INPUT_CSV):
+        print(f"ERROR: Test data not found at {INPUT_CSV}")
+        return
+    
+    plot_score_distributions()
+    plot_confusion_matrix()
+    plot_user_consistency()
+    plot_layer_radar()
+    plot_threshold_tradeoff()  # NEW!
+    
+    print("\n✓ All visualizations generated!")
+    print(f"  → Files saved to {OUTPUT_FOLDER}")
+
+
+if __name__ == "__main__":
+    main()

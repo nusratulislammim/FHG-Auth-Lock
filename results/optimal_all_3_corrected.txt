@@ -1,0 +1,11 @@
+configuration=All 3 Layers (Corrected Voice, Security-First Constraints)
+tau_V=11
+tau_G=16
+tau_M=17
+tau_T=56
+w_V=0.3000
+w_G=0.3000
+w_M=0.4000
+FAR=12.2222
+FRR=11.7778
+AER=12.0000

@@ -1,0 +1,9 @@
+configuration=Voice + Mechanical
+tau_V=20
+tau_M=40
+tau_T=72
+w_V=0.90
+w_M=0.10
+FAR=0.0000
+FRR=1.7778
+AER=0.8889

@@ -1,0 +1,69 @@
+===========================================================================
+FINAL EVALUATION REPORT
+Held-Out Test Set (N=20 Users)
+===========================================================================
+
+OPTIMIZED CONFIGURATION (from training):
+---------------------------------------------------------------------------
+  Layer Thresholds:
+    τV (Voice)      = 20
+    τG (Spatial Gap) = 32
+    τM (Mechanical)  = 50
+    τT (Final)       = 74
+
+  Fusion Weights:
+    wV (Voice)       = 0.35
+    wG (Spatial Gap) = 0.25
+    wM (Mechanical)  = 0.40
+    Sum              = 1.00
+
+TEST SET STATISTICS:
+---------------------------------------------------------------------------
+  Total Attempts:     900
+  Genuine Attempts:   600
+  Impostor Attempts:  300
+  Genuine/Impostor:   2.00
+
+CONFUSION MATRIX:
+---------------------------------------------------------------------------
+                    Predicted
+                    Reject    Accept
+  Actual  Impostor  267       33      
+          Genuine   60        540     
+
+PRIMARY METRICS:
+---------------------------------------------------------------------------
+  FAR (False Accept Rate):   11.00% [95% CI: 11.00%, 11.00%]
+  FRR (False Reject Rate):   10.00% [95% CI: 10.00%, 10.00%]
+  Accuracy:                  89.67%
+  EER (Equal Error Rate):    10.50% (at τ=74)
+  AER (Average Error Rate):  10.50%
+
+SECONDARY METRICS:
+---------------------------------------------------------------------------
+  Precision (PPV):           94.24%
+  Recall (Sensitivity):      90.00%
+  Specificity (TNR):         89.00%
+  F1 Score:                  92.07%
+
+INTERPRETATION:
+---------------------------------------------------------------------------
+  ⚠ Good usability (low FRR) but security concerns (high FAR)
+
+  Out of 300 impostor attempts:
+    267 correctly rejected (89.0%)
+    33 incorrectly accepted (11.0%)
+
+  Out of 600 genuine attempts:
+    540 correctly accepted (90.0%)
+    60 incorrectly rejected (10.0%)
+
+IMPORTANT NOTES:
+---------------------------------------------------------------------------
+  • These results are from HELD-OUT test data (never used in training)
+  • Parameters were optimized on separate training set (N=30 users)
+  • AER ≠ EER: AER is (FAR+FRR)/2 at operating point
+  • EER is computed by sweeping final threshold
+  • All data is SIMULATED (hardware validation pending)
+
+===========================================================================

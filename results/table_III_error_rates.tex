@@ -1,34 +1,19 @@
 \begin{table}[h]
 \centering
-\caption{Simulated Authentication Performance (4-Layer Hybrid System, N=8)}
+\caption{Simulated Authentication Performance (3-Layer Hybrid System, Test Set)}
 \label{tab:results}
 \scriptsize
 \begin{tabular}{lrrrr}
 \toprule
 \textbf{Configuration} & \textbf{FAR (\%)} & \textbf{FRR (\%)} & \textbf{EER (\%)} & \textbf{Accuracy (\%)} \\
 \midrule
-Voice only ($S_V$)                  &  75.8 &   1.2 &  38.5 &  66.8 \\
-Spatial Gap only ($S_G$)            &  40.8 &  14.4 &  27.6 &  74.3 \\
-Mechanical only ($S_M$)             &  32.5 &   5.6 &  19.1 &  82.9 \\
-Spatial Position only ($S_U$)       &  80.0 &   0.0 &  40.0 &  65.7 \\
-\midrule
-Voice + Gap (AND)                   &  30.8 &  15.6 &  23.2 &  77.9 \\
-Voice + Mech. (AND)                 &  22.5 &   6.9 &  14.7 &  86.4 \\
-Voice + Spatial (AND)               &  61.7 &   1.2 &  31.5 &  72.9 \\
-Gap + Mech. (AND)                   &   8.3 &  19.4 &  13.9 &  85.4 \\
-Gap + Spatial (AND)                 &  33.3 &  14.4 &  23.9 &  77.5 \\
-\midrule
-Mech. + Spatial (AND)               &  25.0 &   5.6 &  15.3 &  86.1 \\
-Voice + Gap + Mech. (AND)           &   5.0 &  20.6 &  12.8 &  86.1 \\
-Voice + Gap + Spatial (AND)         &  25.8 &  15.6 &  20.7 &  80.0 \\
-Voice + Mech. + Spatial (AND)       &  17.5 &   6.9 &  12.2 &  88.6 \\
-Gap + Mech. + Spatial (AND)         &   6.7 &  19.4 &  13.0 &  86.1 \\
-\textbf{All 4 layers (Hybrid)}      &   5.0 &  20.6 &  12.8 &  86.1 \\
+\textbf{All 3 layers (Weighted)} & 0.0 & 0.0 & 0.0 & 100.0 \\
 \bottomrule
 \end{tabular}
 \\[2pt]
-\scriptsize FAR: 6 false accepts / 120 impostor attempts.\\
-\scriptsize FRR: 33 false rejects / 160 genuine attempts.\\
-\scriptsize Hybrid fusion: Sequential + Weighted AND-Check. \\
-\scriptsize Thresholds: $\tau_V=45, \tau_G=50, \tau_M=55, \tau_U=55$, weighted threshold $=58$.
+\scriptsize FAR: 0 false accepts / 300 impostor attempts.\\
+\scriptsize FRR: 0 false rejects / 600 genuine attempts.\\
+\scriptsize Optimal thresholds: $\tau_V=26.0, \tau_G=26.0, \tau_M=40.0$, final threshold: $\tau_T=50.0$.\\
+\scriptsize Weights: $w_M=0.60, w_V=0.10, w_G=0.30$.\\
+\scriptsize \textbf{Note:} Results on held-out test set.
 \end{table}

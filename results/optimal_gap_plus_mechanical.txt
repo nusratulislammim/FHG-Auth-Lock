@@ -1,0 +1,9 @@
+configuration=Gap + Mechanical
+tau_G=20
+tau_M=54
+tau_T=60
+w_G=0.25
+w_M=0.75
+FAR=12.4444
+FRR=9.2222
+AER=10.8333
