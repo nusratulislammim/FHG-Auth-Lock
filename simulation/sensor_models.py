@@ -1,5 +1,5 @@
 """
-sensor_models.py - BEST PERFORMING VERSION
+sensor_models.py - WORKING VERSION
 Voice divisor=0.3, Mechanical delta_f=50, delta_t=100
 """
 import numpy as np
@@ -12,6 +12,7 @@ import warnings
 # ============================================================
 # SPEAKER MODEL
 # ============================================================
+
 class SpeakerModel:
     """Speaker-specific voice characteristics."""
     
@@ -36,6 +37,7 @@ class SpeakerModel:
 # ============================================================
 # VOICE TEMPLATE
 # ============================================================
+
 class VoiceTemplate:
     """Stores MFCC templates for enrolled digits."""
     
@@ -67,6 +69,7 @@ class VoiceTemplate:
 # ============================================================
 # VOICE SIMULATOR
 # ============================================================
+
 class VoiceSimulator:
     """Voice authentication with MFCC + DTW."""
     
@@ -79,9 +82,9 @@ class VoiceSimulator:
         self.frame_size = frame_size
         self.hop_length = hop_length
         self.num_filters = num_filters
-    
+
     def generate_waveform_with_frames(self, digit: int, energy_level: float, 
-                                       variation: float = 0.0) -> Tuple[np.ndarray, np.ndarray]:
+                                      variation: float = 0.0) -> Tuple[np.ndarray, np.ndarray]:
         speaker = self.speaker
         base_pitch = speaker.pitch_base + digit * 2.0
         pitch = np.random.normal(base_pitch, speaker.pitch_variability)
@@ -129,7 +132,7 @@ class VoiceSimulator:
         
         mfcc_sequence = self.extract_mfcc_frames(waveform)
         return waveform, mfcc_sequence
-    
+
     def extract_mfcc_frames(self, waveform: np.ndarray) -> np.ndarray:
         if len(waveform) < self.frame_size:
             waveform = np.pad(waveform, (0, self.frame_size - len(waveform)))
@@ -190,7 +193,7 @@ class VoiceSimulator:
             mfcc_sequence.append(mfcc)
         
         return np.asarray(mfcc_sequence, dtype=float)
-    
+
     def compute_dtw_cost(self, observed_seq: np.ndarray, template_sequences: List[np.ndarray]) -> float:
         if len(observed_seq) == 0 or len(template_sequences) == 0:
             return float("inf")
@@ -211,9 +214,9 @@ class VoiceSimulator:
             distances.append(dtw[n, m] / (n + m))
         
         return float(np.median(distances)) if distances else float("inf")
-    
+
     def simulate_voice_attempt(self, true_digit: int, template: VoiceTemplate,
-                                energy_level: float, digit_index: int) -> Tuple[float, float]:
+                               energy_level: float, digit_index: int) -> Tuple[float, float]:
         variation = 0.05 + np.random.random() * 0.15
         _, observed_mfcc = self.generate_waveform_with_frames(
             digit=true_digit, energy_level=energy_level, variation=variation
@@ -221,7 +224,7 @@ class VoiceSimulator:
         template_sequences = template.get_templates(digit_index)
         dtw_cost = self.compute_dtw_cost(observed_mfcc, template_sequences)
         
-        # BEST PERFORMING DIVISOR = 0.3
+        # WORKING DIVISOR = 0.3
         score = 100 * np.exp(-dtw_cost / 0.3)
         score = np.clip(score + np.random.normal(0, 3), 0, 100)
         return float(score), float(dtw_cost)
@@ -229,6 +232,7 @@ class VoiceSimulator:
 # ============================================================
 # USER PROFILE
 # ============================================================
+
 class UserProfile:
     """Complete user profile."""
     
@@ -259,6 +263,7 @@ class UserProfile:
 # ============================================================
 # SENSOR SIMULATORS
 # ============================================================
+
 class FSRSimulator:
     def __init__(self, noise_factor: float = 0.03):
         self.noise_factor = noise_factor
@@ -301,6 +306,7 @@ class UltrasonicSimulator:
 # ============================================================
 # IMPOSTOR MODEL
 # ============================================================
+
 class ImpostorModel:
     def __init__(self, genuine_profile: UserProfile, impostor_speaker: SpeakerModel, observation_accuracy: float = 0.70):
         self.genuine = genuine_profile
@@ -308,7 +314,7 @@ class ImpostorModel:
         self.accuracy = observation_accuracy
         
         self.estimated_force = [self._estimate_value(f, 150) for f in genuine_profile.force_levels]
-        self.estimated_hold = [self._estimate_value(h, 200) for h in genuine_profile.hold_times]
+        self.estimated_hold = [self._estimate_value(h, 200) for h in genuine_profile.hold_times]  # FIXED
         self.estimated_gap = [self._estimate_value(g, 180) for g in genuine_profile.gap_times]
         
         # 50% impostor digit error rate
@@ -341,9 +347,10 @@ class ImpostorModel:
 # ============================================================
 # SCORING FUNCTIONS
 # ============================================================
+
 def compute_mechanical_score(observed: Dict, enrolled_mean: Dict, 
-                              delta_f: float = 30, delta_t: float = 50) -> int:
-    """BEST PERFORMING: delta_f=50, delta_t=100"""
+                             delta_f: float = 50, delta_t: float = 100) -> int:
+    """WORKING: delta_f=50, delta_t=100"""
     scores = []
     for i in range(3):
         dF = (observed["force"][i] - enrolled_mean["force"][i]) / delta_f
@@ -356,7 +363,7 @@ def compute_mechanical_score(observed: Dict, enrolled_mean: Dict,
     return int(np.clip(100 * np.mean(scores), 0, 100))
 
 def compute_spatial_gap_score(observed_gaps: List[float], enrolled_gaps: List[float], 
-                               tolerance_mm: float = 25) -> int:
+                              tolerance_mm: float = 25) -> int:
     if len(observed_gaps) != 2 or len(enrolled_gaps) != 2:
         return 0
     scores = []
@@ -366,9 +373,9 @@ def compute_spatial_gap_score(observed_gaps: List[float], enrolled_gaps: List[fl
     return int(np.clip(100 * np.mean(scores), 0, 100))
 
 def apply_hybrid_fusion(s_m: float, s_v: float, s_g: float,
-                         seq_thresh_v: int = 34, seq_thresh_g: int = 38, seq_thresh_m: int = 62,
-                         w_m: float = 0.45, w_v: float = 0.15, w_g: float = 0.40,
-                         weighted_threshold: int = 60) -> Tuple[bool, str]:
+                       seq_thresh_v: int = 34, seq_thresh_g: int = 38, seq_thresh_m: int = 62,
+                       w_m: float = 0.45, w_v: float = 0.15, w_g: float = 0.40,
+                       weighted_threshold: int = 60) -> Tuple[bool, str]:
     if s_v < seq_thresh_v:
         return False, f"Voice screening failed ({s_v:.1f} < {seq_thresh_v})"
     if s_g < seq_thresh_g:

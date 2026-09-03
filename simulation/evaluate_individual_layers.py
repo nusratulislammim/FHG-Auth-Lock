@@ -1,161 +1,148 @@
 """
-evaluate_individual_layers.py - Evaluate each layer individually on test data
+evaluate_individual_layers.py - Per-layer + fusion evaluation on test set
 """
 import os
 import sys
 import pandas as pd
 import numpy as np
 
-# ============================================================
-# CONFIGURATION
-# ============================================================
-TEST_DATA_FILE = '../data/test_data.csv'
+TEST_DATA_FILE      = '../data/test_data.csv'
 OPTIMAL_CONFIG_FILE = '../results/optimal_all_3.txt'
-RESULTS_DIR = '../results/'
-OUTPUT_FILE = os.path.join(RESULTS_DIR, 'individual_layer_performance.txt')
+RESULTS_DIR         = '../results/'
+OUTPUT_FILE         = os.path.join(RESULTS_DIR, 'individual_layer_performance.txt')
+
 os.makedirs(RESULTS_DIR, exist_ok=True)
 
-# ============================================================
-# DATA LOADING
-# ============================================================
+# ---------------------------------------------------------------
+
 def load_test_data():
-    """Load test data and split into genuine/impostor."""
     df = pd.read_csv(TEST_DATA_FILE)
     if df['genuine'].dtype != bool:
         df['genuine'] = df['genuine'].astype(str).str.lower().map({
             'true': True, 'false': False, '1': True, '0': False
         })
-    genuine = df[df['genuine'] == True]
-    impostor = df[df['genuine'] == False]
-    return genuine, impostor
+    return df[df['genuine'] == True], df[df['genuine'] == False]
 
 def load_config():
-    """Load optimal configuration from training."""
     config = {}
     with open(OPTIMAL_CONFIG_FILE, 'r', encoding='utf-8') as f:
         for line in f:
             if '=' in line:
-                key, value = line.strip().split('=', 1)
-                if key.startswith('tau_'):
-                    config[key] = int(float(value))
-                elif key.startswith('w_'):
-                    config[key] = float(value)
+                k, v = line.strip().split('=', 1)
+                if k.startswith('tau_'):
+                    config[k] = int(float(v))
+                elif k.startswith('w_'):
+                    config[k] = float(v)
     return config
 
-# ============================================================
-# EVALUATION FUNCTIONS
-# ============================================================
-def find_eer(genuine_scores, impostor_scores):
-    """Find Equal Error Rate point."""
-    results = []
-    for thresh in range(0, 101, 1):
-        gen_accept = (genuine_scores >= thresh).sum()
-        imp_accept = (impostor_scores >= thresh).sum()
-        
-        far = 100 * imp_accept / len(impostor_scores)
-        frr = 100 * (len(genuine_scores) - gen_accept) / len(genuine_scores)
-        acc = 100 * (gen_accept + (len(impostor_scores) - imp_accept)) / (len(genuine_scores) + len(impostor_scores))
-        
-        results.append({'threshold': thresh, 'far': far, 'frr': frr, 'diff': abs(far - frr), 'accuracy': acc})
+def find_eer(g_scores, i_scores):
+    best = {'diff': float('inf')}
+    for thresh in range(0, 101):
+        ga  = (g_scores >= thresh).sum()
+        ia  = (i_scores >= thresh).sum()
+        far = 100 * ia / len(i_scores)
+        frr = 100 * (len(g_scores) - ga) / len(g_scores)
+        acc = 100 * (ga + (len(i_scores) - ia)) / (len(g_scores) + len(i_scores))
+        diff = abs(far - frr)
+        if diff < best['diff']:
+            best = {'threshold': thresh, 'far': far, 'frr': frr,
+                    'diff': diff, 'accuracy': acc}
+    eer = (best['far'] + best['frr']) / 2
+    return best['threshold'], eer, best['far'], best['frr'], best['accuracy']
 
-    df_results = pd.DataFrame(results)
-    eer_idx = df_results['diff'].idxmin()
-    eer_point = df_results.loc[eer_idx]
-    eer = (eer_point['far'] + eer_point['frr']) / 2
-    return eer_point['threshold'], eer, eer_point['far'], eer_point['frr'], eer_point['accuracy']
-
-def evaluate_fusion(genuine, impostor, config):
-    """Evaluate complete 3-layer fusion system."""
-    # Stage 1: Sequential screening
+def evaluate_fusion(genuine, impostor, cfg):
     g_screen = genuine.apply(
-        lambda row: (row['S_V'] >= config['tau_V']) and (row['S_G'] >= config['tau_G']) and (row['S_M'] >= config['tau_M']),
-        axis=1
-    )
+        lambda r: r['S_V'] >= cfg['tau_V'] and
+                  r['S_G'] >= cfg['tau_G'] and
+                  r['S_M'] >= cfg['tau_M'], axis=1)
     i_screen = impostor.apply(
-        lambda row: (row['S_V'] >= config['tau_V']) and (row['S_G'] >= config['tau_G']) and (row['S_M'] >= config['tau_M']),
-        axis=1
-    )
-    
-    # Stage 2: Weighted fusion
-    gen_accept = genuine[g_screen].apply(
-        lambda row: (config['w_M']*row['S_M'] + config['w_V']*row['S_V'] + config['w_G']*row['S_G']) >= config['tau_T'],
-        axis=1
-    ).sum()
-    imp_accept = impostor[i_screen].apply(
-        lambda row: (config['w_M']*row['S_M'] + config['w_V']*row['S_V'] + config['w_G']*row['S_G']) >= config['tau_T'],
-        axis=1
-    ).sum()
-    
-    far = 100 * imp_accept / len(impostor)
-    frr = 100 * (len(genuine) - gen_accept) / len(genuine)
-    acc = 100 * (gen_accept + (len(impostor) - imp_accept)) / (len(genuine) + len(impostor))
-    
+        lambda r: r['S_V'] >= cfg['tau_V'] and
+                  r['S_G'] >= cfg['tau_G'] and
+                  r['S_M'] >= cfg['tau_M'], axis=1)
+
+    ga = genuine[g_screen].apply(
+        lambda r: cfg['w_M']*r['S_M'] + cfg['w_V']*r['S_V'] + cfg['w_G']*r['S_G'] >= cfg['tau_T'],
+        axis=1).sum()
+    ia = impostor[i_screen].apply(
+        lambda r: cfg['w_M']*r['S_M'] + cfg['w_V']*r['S_V'] + cfg['w_G']*r['S_G'] >= cfg['tau_T'],
+        axis=1).sum()
+
+    ng, ni = len(genuine), len(impostor)
+    far = 100 * ia / ni
+    frr = 100 * (ng - ga) / ng
+    acc = 100 * (ga + (ni - ia)) / (ng + ni)
     return {
-        'far': far, 'frr': frr, 'aer': (far + frr) / 2, 'accuracy': acc,
-        'tp': int(gen_accept), 'fn': len(genuine) - int(gen_accept),
-        'fp': int(imp_accept), 'tn': len(impostor) - int(imp_accept)
+        'far': far, 'frr': frr, 'aer': (far+frr)/2, 'accuracy': acc,
+        'tp': int(ga), 'fn': ng - int(ga),
+        'fp': int(ia), 'tn': ni - int(ia)
     }
 
-# ============================================================
-# MAIN FUNCTION
-# ============================================================
+# ---------------------------------------------------------------
+
 def main():
-    """Main evaluation workflow."""
     print("\n" + "=" * 80)
     print("INDIVIDUAL LAYER PERFORMANCE EVALUATION")
     print("=" * 80)
-    
+
     genuine, impostor = load_test_data()
-    config = load_config()
-    
+    cfg               = load_config()
+
     print(f"\nTest Set: {len(genuine)} genuine, {len(impostor)} impostor")
-    print(f"Configuration: tau_V={config['tau_V']}, tau_G={config['tau_G']}, tau_M={config['tau_M']}, tau_T={config['tau_T']}")
-    print(f"Weights: w_V={config['w_V']:.2f}, w_G={config['w_G']:.2f}, w_M={config['w_M']:.2f}\n")
-    
-    # Individual layers
+    print(f"Config: tau_V={cfg['tau_V']}, tau_G={cfg['tau_G']}, "
+          f"tau_M={cfg['tau_M']}, tau_T={cfg['tau_T']}")
+    print(f"Weights: w_V={cfg['w_V']:.2f}, w_G={cfg['w_G']:.2f}, w_M={cfg['w_M']:.2f}\n")
+
     layers = {'Voice': 'S_V', 'Spatial Gap': 'S_G', 'Mechanical': 'S_M'}
     layer_results = {}
-    
+
     for name, col in layers.items():
-        thresh, eer, far, frr, acc = find_eer(genuine[col], impostor[col])
+        t, eer, far, frr, acc = find_eer(genuine[col], impostor[col])
         layer_results[name] = {
-            'optimal_threshold': thresh, 'eer': eer,
+            'optimal_threshold': t, 'eer': eer,
             'far': far, 'frr': frr, 'accuracy': acc
         }
-    
-    # Fusion
-    fusion_results = evaluate_fusion(genuine, impostor, config)
-    
-    # Report
-    report = []
-    report.append("=" * 80)
-    report.append("INDIVIDUAL LAYER PERFORMANCE (Test Set)")
-    report.append("=" * 80)
-    report.append(f"\n{'Layer':<20} {'Threshold':<12} {'FAR (%)':<10} {'FRR (%)':<10} {'EER (%)':<10} {'Acc (%)':<10}")
-    report.append("-" * 80)
-    
+
+    fusion = evaluate_fusion(genuine, impostor, cfg)
+
+    lines = []
+    lines.append("=" * 80)
+    lines.append("INDIVIDUAL LAYER PERFORMANCE (Test Set)")
+    lines.append("=" * 80)
+    lines.append(f"\n{'Layer':<20} {'Threshold':<12} {'FAR (%)':<10} "
+                 f"{'FRR (%)':<10} {'EER (%)':<10} {'Acc (%)':<10}")
+    lines.append("-" * 80)
+
     for name in ['Voice', 'Spatial Gap', 'Mechanical']:
-        res = layer_results[name]
-        report.append(f"{name:<20} {res['optimal_threshold']:<12.0f} {res['far']:<10.2f} {res['frr']:<10.2f} "
-                      f"{res['eer']:<10.2f} {res['accuracy']:<10.2f}")
-    
-    report.append("\n3-LAYER FUSION SYSTEM")
-    report.append("-" * 80)
-    report.append(f"FAR = {fusion_results['far']:.2f}%")
-    report.append(f"FRR = {fusion_results['frr']:.2f}%")
-    report.append(f"Accuracy = {fusion_results['accuracy']:.2f}%")
-    report.append(f"Confusion: TP={fusion_results['tp']}, FN={fusion_results['fn']}, "
-                  f"FP={fusion_results['fp']}, TN={fusion_results['tn']}")
-    report.append("=" * 80)
-    
-    report_text = "\n".join(report)
-    
-    # Save with UTF-8 encoding to avoid Windows charmap errors
+        r = layer_results[name]
+        lines.append(f"{name:<20} {r['optimal_threshold']:<12.0f} "
+                     f"{r['far']:<10.2f} {r['frr']:<10.2f} "
+                     f"{r['eer']:<10.2f} {r['accuracy']:<10.2f}")
+
+    lines.append("\n3-LAYER FUSION SYSTEM")
+    lines.append("-" * 80)
+    lines.append(f"FAR      = {fusion['far']:.2f}%")
+    lines.append(f"FRR      = {fusion['frr']:.2f}%")
+    lines.append(f"AER      = {fusion['aer']:.2f}%")
+    lines.append(f"Accuracy = {fusion['accuracy']:.2f}%")
+    lines.append(f"Confusion: TP={fusion['tp']}, FN={fusion['fn']}, "
+                 f"FP={fusion['fp']}, TN={fusion['tn']}")
+    lines.append("=" * 80)
+
+    # Layer ranking
+    ranked = sorted(layer_results.items(), key=lambda x: x[1]['eer'])
+    lines.append("\nLAYER RANKING (best to worst EER):")
+    for rank, (name, r) in enumerate(ranked, 1):
+        lines.append(f"  {rank}. {name:<15} EER = {r['eer']:.2f}%")
+
+    lines.append(f"\nFusion AER = {fusion['aer']:.2f}%  "
+                 f"(vs best single-layer EER = {ranked[0][1]['eer']:.2f}%)")
+
+    report = "\n".join(lines)
+    print(report)
+
     with open(OUTPUT_FILE, 'w', encoding='utf-8') as f:
-        f.write(report_text)
-    
-    print(report_text)
-    print(f"\n✓ Saved: {OUTPUT_FILE}\n")
+        f.write(report)
+    print(f"\nSaved: {OUTPUT_FILE}\n")
     return 0
 
 if __name__ == "__main__":
