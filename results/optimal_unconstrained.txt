@@ -1,0 +1,15 @@
+UNCONSTRAINED FUSION OPTIMIZATION
+==================================================
+
+tau_V = 70
+tau_G = 5
+tau_M = 10
+tau_T = 55
+
+w_V = 0.5000
+w_G = 0.2000
+w_M = 0.3000
+
+Training FAR = 1.5556%
+Training FRR = 1.1111%
+Training AER = 1.3333%
